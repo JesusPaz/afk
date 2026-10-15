@@ -1,0 +1,487 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		309A3E6234AFDED8DC3BE85F /* TerminalSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A449C7DA07D591BACF5EC9C /* TerminalSurface.swift */; };
+		51B449514D199D847262FE34 /* AFKiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E6DB50FCA2DDBA2DD681F1E /* AFKiOSApp.swift */; };
+		777B060D3748EDFB382083AE /* RemoteModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A042047838ADFF74D1C2190F /* RemoteModel.swift */; };
+		8B8C32B9A85509F6DBA1188F /* TerminalSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A449C7DA07D591BACF5EC9C /* TerminalSurface.swift */; };
+		945BADE8018F4D6BB4954F8B /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 410EE7A8D1247B8977657820 /* SwiftTerm */; };
+		9619F9D975B8977348B3B39F /* AFKMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B0623D814CAE8F07A803060 /* AFKMacApp.swift */; };
+		CCC96667C6CEB1438EC8A7CD /* AFKCore in Frameworks */ = {isa = PBXBuildFile; productRef = F708F1325225AC472C3E5027 /* AFKCore */; };
+		D7D2A340A0FB3DADEED13630 /* AFKCore in Frameworks */ = {isa = PBXBuildFile; productRef = 71CD64BA34A25A8960983F63 /* AFKCore */; };
+		DAD7322A8C497C552F0587DA /* AFKHost in Frameworks */ = {isa = PBXBuildFile; productRef = 77E64D94D0EE1B7E12461043 /* AFKHost */; };
+		E17632CE05859969690D54AE /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = E8637D12C0FF5B9B2E297EB7 /* SwiftTerm */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		3B0623D814CAE8F07A803060 /* AFKMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AFKMacApp.swift; sourceTree = "<group>"; };
+		6396319D54F8A29292B6DB77 /* AFKiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AFKiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6E6DB50FCA2DDBA2DD681F1E /* AFKiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AFKiOSApp.swift; sourceTree = "<group>"; };
+		8A449C7DA07D591BACF5EC9C /* TerminalSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurface.swift; sourceTree = "<group>"; };
+		8BAB24EA52B5BA421B0939BA /* afk */ = {isa = PBXFileReference; lastKnownFileType = folder; name = afk; path = ../..; sourceTree = SOURCE_ROOT; };
+		A042047838ADFF74D1C2190F /* RemoteModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteModel.swift; sourceTree = "<group>"; };
+		D9C968A4CA3174B4C0121CA6 /* AFKMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AFKMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1B7577344A5B311764AFEAC9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D7D2A340A0FB3DADEED13630 /* AFKCore in Frameworks */,
+				E17632CE05859969690D54AE /* SwiftTerm in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C376C20215A71A6721161D37 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CCC96667C6CEB1438EC8A7CD /* AFKCore in Frameworks */,
+				DAD7322A8C497C552F0587DA /* AFKHost in Frameworks */,
+				945BADE8018F4D6BB4954F8B /* SwiftTerm in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2C230FCD7524242F2F1DCA56 = {
+			isa = PBXGroup;
+			children = (
+				3554BF6589F9144FBBDEEBF3 /* iOS */,
+				D33839AE34A1A89FF7CEB94C /* macOS */,
+				31DAB8CEDF86625AA7B83C66 /* Packages */,
+				992726789D69A3218C1C67B8 /* Shared */,
+				91A963CE643336996E1D56DB /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		31DAB8CEDF86625AA7B83C66 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				8BAB24EA52B5BA421B0939BA /* afk */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		3554BF6589F9144FBBDEEBF3 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				6E6DB50FCA2DDBA2DD681F1E /* AFKiOSApp.swift */,
+				A042047838ADFF74D1C2190F /* RemoteModel.swift */,
+			);
+			path = iOS;
+			sourceTree = "<group>";
+		};
+		91A963CE643336996E1D56DB /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6396319D54F8A29292B6DB77 /* AFKiOS.app */,
+				D9C968A4CA3174B4C0121CA6 /* AFKMac.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		992726789D69A3218C1C67B8 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				8A449C7DA07D591BACF5EC9C /* TerminalSurface.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		D33839AE34A1A89FF7CEB94C /* macOS */ = {
+			isa = PBXGroup;
+			children = (
+				3B0623D814CAE8F07A803060 /* AFKMacApp.swift */,
+			);
+			path = macOS;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8CE9F8EA969522859C903A27 /* AFKMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 889A7DBCFB715D4A444381DC /* Build configuration list for PBXNativeTarget "AFKMac" */;
+			buildPhases = (
+				5D21283D7C1E8DEA95B8EF41 /* Sources */,
+				C376C20215A71A6721161D37 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AFKMac;
+			packageProductDependencies = (
+				F708F1325225AC472C3E5027 /* AFKCore */,
+				77E64D94D0EE1B7E12461043 /* AFKHost */,
+				410EE7A8D1247B8977657820 /* SwiftTerm */,
+			);
+			productName = AFKMac;
+			productReference = D9C968A4CA3174B4C0121CA6 /* AFKMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		9C02A7AFD5450CDDBA369ACA /* AFKiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E2141D1B98B26D287A018565 /* Build configuration list for PBXNativeTarget "AFKiOS" */;
+			buildPhases = (
+				9C72907EE2D52F4B8F8A3E96 /* Sources */,
+				1B7577344A5B311764AFEAC9 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AFKiOS;
+			packageProductDependencies = (
+				71CD64BA34A25A8960983F63 /* AFKCore */,
+				E8637D12C0FF5B9B2E297EB7 /* SwiftTerm */,
+			);
+			productName = AFKiOS;
+			productReference = 6396319D54F8A29292B6DB77 /* AFKiOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		42C3A64E860E3D1BA8963C4F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 845840AFD6B03F2BE992AB97 /* Build configuration list for PBXProject "AFK" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2C230FCD7524242F2F1DCA56;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5C9DEBA58BCCBF73A38BF18B /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				D444CDFD164EB05A97178BA7 /* XCLocalSwiftPackageReference "../.." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 91A963CE643336996E1D56DB /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8CE9F8EA969522859C903A27 /* AFKMac */,
+				9C02A7AFD5450CDDBA369ACA /* AFKiOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5D21283D7C1E8DEA95B8EF41 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9619F9D975B8977348B3B39F /* AFKMacApp.swift in Sources */,
+				309A3E6234AFDED8DC3BE85F /* TerminalSurface.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9C72907EE2D52F4B8F8A3E96 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				51B449514D199D847262FE34 /* AFKiOSApp.swift in Sources */,
+				777B060D3748EDFB382083AE /* RemoteModel.swift in Sources */,
+				8B8C32B9A85509F6DBA1188F /* TerminalSurface.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		2542BEF62D2EC8AA925674D5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				INFOPLIST_KEY_CFBundleDisplayName = AFK;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jesuspaz.afk.mac;
+				PRODUCT_NAME = AFK;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		3595B6185477C62488F27CE4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_KEY_CFBundleDisplayName = AFK;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jesuspaz.afk.ios;
+				PRODUCT_NAME = AFK;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		3DACE8607A0F641E03033ADE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		513E4B6FAB69620DC2E0D33E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		6FEF3168D4D9F4CDD80D9A52 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				INFOPLIST_KEY_CFBundleDisplayName = AFK;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jesuspaz.afk.mac;
+				PRODUCT_NAME = AFK;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		AB6A7DF853A7D969BD636977 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_KEY_CFBundleDisplayName = AFK;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jesuspaz.afk.ios;
+				PRODUCT_NAME = AFK;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		845840AFD6B03F2BE992AB97 /* Build configuration list for PBXProject "AFK" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3DACE8607A0F641E03033ADE /* Debug */,
+				513E4B6FAB69620DC2E0D33E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		889A7DBCFB715D4A444381DC /* Build configuration list for PBXNativeTarget "AFKMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2542BEF62D2EC8AA925674D5 /* Debug */,
+				6FEF3168D4D9F4CDD80D9A52 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E2141D1B98B26D287A018565 /* Build configuration list for PBXNativeTarget "AFKiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB6A7DF853A7D969BD636977 /* Debug */,
+				3595B6185477C62488F27CE4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		D444CDFD164EB05A97178BA7 /* XCLocalSwiftPackageReference "../.." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5C9DEBA58BCCBF73A38BF18B /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/migueldeicaza/SwiftTerm.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.20.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		410EE7A8D1247B8977657820 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C9DEBA58BCCBF73A38BF18B /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+		71CD64BA34A25A8960983F63 /* AFKCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AFKCore;
+		};
+		77E64D94D0EE1B7E12461043 /* AFKHost */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AFKHost;
+		};
+		E8637D12C0FF5B9B2E297EB7 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C9DEBA58BCCBF73A38BF18B /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
+		F708F1325225AC472C3E5027 /* AFKCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AFKCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 42C3A64E860E3D1BA8963C4F /* Project object */;
+}
