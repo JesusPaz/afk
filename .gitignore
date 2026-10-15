@@ -1,0 +1,13 @@
+.DS_Store
+.build/
+DerivedData/
+.env
+.env.*
+!.env.example
+*.xcuserstate
+xcuserdata/
+.tools/
+.artifacts/
+*.log
+server/relay
+.claude-context
