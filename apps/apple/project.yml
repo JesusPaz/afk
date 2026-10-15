@@ -1,0 +1,62 @@
+name: AFK
+options:
+  bundleIdPrefix: com.jesuspaz.afk
+  deploymentTarget:
+    macOS: '14.0'
+    iOS: '17.0'
+packages:
+  AFK:
+    path: ../..
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm.git
+    exactVersion: 1.20.0
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    MARKETING_VERSION: '0.1.0'
+    CURRENT_PROJECT_VERSION: 1
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_FILE: Info.plist
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  AFKMac:
+    type: application
+    platform: macOS
+    sources: [macOS, Shared]
+    dependencies:
+      - package: AFK
+        product: AFKCore
+      - package: AFK
+        product: AFKHost
+      - package: SwiftTerm
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jesuspaz.afk.mac
+        PRODUCT_NAME: AFK
+        ENABLE_APP_SANDBOX: NO
+        INFOPLIST_KEY_CFBundleDisplayName: AFK
+  AFKiOS:
+    type: application
+    platform: iOS
+    sources: [iOS, Shared]
+    dependencies:
+      - package: AFK
+        product: AFKCore
+      - package: SwiftTerm
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jesuspaz.afk.ios
+        PRODUCT_NAME: AFK
+        TARGETED_DEVICE_FAMILY: '1'
+        INFOPLIST_KEY_CFBundleDisplayName: AFK
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+schemes:
+  AFKMac:
+    build:
+      targets:
+        AFKMac: all
+  AFKiOS:
+    build:
+      targets:
+        AFKiOS: all

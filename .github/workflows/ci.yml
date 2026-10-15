@@ -1,0 +1,40 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  server:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_USER: afk
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: afk
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U afk -d afk"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AFK_TEST_DATABASE_URL: postgres://afk:ci-only-password@localhost:5432/afk?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - run: go test -race ./...
+        working-directory: server
+      - run: go vet ./...
+        working-directory: server
+  apple:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app
+      - run: swift test
+      - run: xcodebuild -downloadComponent MetalToolchain
+      - run: xcodebuild -project apps/apple/AFK.xcodeproj -scheme AFKMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation
+      - run: xcodebuild -project apps/apple/AFK.xcodeproj -scheme AFKiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation
