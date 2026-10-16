@@ -26,7 +26,7 @@ let package = Package(
         ], path: "packages/AFKCore/Sources/AFKCore", resources: [.process("Resources")]),
         .target(name: "AFKHost", dependencies: ["AFKCore", "SwiftTerm"], path: "packages/AFKHost/Sources/AFKHost"),
         .executableTarget(name: "AFKHostCLI", dependencies: ["AFKHost", "AFKCore"], path: "apps/host-cli"),
-        .testTarget(name: "AFKTerminalTests", dependencies: ["AFKCore", "SwiftTerm"], path: "apps/apple", exclude: ["Resources", "macOS", "iOS", "Info.plist", "project.yml", "AFK.xcodeproj"], sources: ["Shared", "Tests"]),
+        .testTarget(name: "AFKTerminalTests", dependencies: ["AFKCore", "SwiftTerm"], path: "apps/apple", exclude: ["Resources", "macOS", "iOS/AFKiOSApp.swift", "Info.plist", "project.yml", "AFK.xcodeproj"], sources: ["Shared", "Tests", "iOS/RemoteModel.swift"]),
         .testTarget(name: "AFKHostTests", dependencies: ["AFKHost"], path: "packages/AFKHost/Tests"),
         .testTarget(name: "AFKCoreTests", dependencies: ["AFKCore", .product(name: "NIOEmbedded", package: "swift-nio")], path: "packages/AFKCore/Tests/AFKCoreTests")
     ],

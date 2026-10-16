@@ -45,10 +45,11 @@ public final class HostSession: ObservableObject, Identifiable {
     public func expireControl() {
         if !lease.owner.isEmpty && lease.owner != "local" && ProcessInfo.processInfo.systemUptime - lastRenewal > 30 { release(lease.owner) }
     }
-    public func input(_ bytes: Data, client: String, epoch: UInt64, sequence: UInt64) {
-        guard running, bytes.count <= 8192, lease.accept(client: client, epoch: epoch, sequence: sequence) else { return }
+    @discardableResult
+    public func input(_ bytes: Data, client: String, epoch: UInt64, sequence: UInt64) -> Bool {
+        guard running, !bytes.isEmpty, bytes.count <= 8192, lease.accept(client: client, epoch: epoch, sequence: sequence) else { return false }
         lastRenewal = ProcessInfo.processInfo.systemUptime
-        process.send(bytes)
+        process.send(bytes); return true
     }
     public func localResize(_ size: TerminalSize) {
         guard size.isValid else { return }

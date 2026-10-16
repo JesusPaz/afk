@@ -6,6 +6,9 @@ public struct SessionInfo: Codable, Identifiable, Equatable {
     public var running: Bool
     public var owner: String
     public var epoch: UInt64
+    public var canControl: Bool?
+    public var canTerminate: Bool?
+    public var controlExpiresAt: Date?
     public init(id: String, name: String, running: Bool, owner: String, epoch: UInt64) {
         self.id = id; self.name = name; self.running = running; self.owner = owner; self.epoch = epoch
     }
@@ -24,6 +27,7 @@ public struct Message: Codable {
     public var owner: String?
     public var name: String?
     public var sessions: [SessionInfo]?
+    public var canCreate: Bool?
     public var message: String?
     public init(_ type: String, sessionID: String? = nil) { self.type = type; self.sessionID = sessionID }
 }

@@ -75,6 +75,11 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
         drop(id)
         if let base, let credentials { try await api.revoke(base, token: credentials.token, clientID: id, version: "v2") }
     }
+    public func cancelInvitation() throws { try trust?.cancelInvitation() }
+    public func revokeAll() throws {
+        disconnect()
+        try trust?.revokeAll()
+    }
     private func open(_ offer: ControlOffer, generation current: UUID) {
         guard offer.id.count == 32, offer.id.allSatisfy(\.isHexDigit), UUID(uuidString: offer.clientID) != nil,
               let base, let credentials, let trust, let host else { return }
@@ -103,7 +108,8 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
                     var m = Message("clientConnected"); m.clientID = offer.clientID; self.onMessage?(m)
                 } else {
                     guard trust.state.peers.contains(where: { $0.id == offer.clientID && $0.certificate == certificate }),
-                          packet.type == "message", var m = packet.message else { throw SecureError.protocolViolation }
+                          packet.type == "message", var m = packet.message,
+                          ["list", "create", "attach", "claim", "release", "renew", "input", "resize", "terminate"].contains(m.type) else { throw SecureError.protocolViolation }
                     m.clientID = offer.clientID; self.onMessage?(m)
                 }
             } catch { self.drop(offer.clientID) }

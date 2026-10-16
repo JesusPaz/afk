@@ -64,7 +64,7 @@ struct PhoneHome: View {
                         }
                         Section {
                             if model.sessions.isEmpty {
-                                Text(model.hostAvailable ? L10n.text("Abre tu primera terminal aquí o en el Mac.") : L10n.text("Las sesiones aparecerán cuando tu Mac se conecte."))
+                                Text(model.hostAvailable ? L10n.text("Comparte una sesión desde Dispositivos en tu Mac.") : L10n.text("Las sesiones aparecerán cuando tu Mac se conecte."))
                                     .foregroundStyle(.secondary).padding(.vertical, 8)
                             }
                             ForEach(model.sessions) { session in
@@ -83,7 +83,7 @@ struct PhoneHome: View {
                             }
                             Button { model.create() } label: {
                                 Label(L10n.text("Nueva sesión"), systemImage: "plus").frame(minHeight: 44)
-                            }.disabled(!model.hostAvailable)
+                            }.disabled(!model.hostAvailable || !model.canCreate)
                         } header: { Text(L10n.text("Tus sesiones")) }
                         footer: { Text(L10n.text("Las sesiones se ejecutan en tu Mac. Salir de AFK en el Mac las detiene.")) }
                     }
@@ -153,17 +153,21 @@ struct PhoneTerminal: View {
     @ObservedObject var model: RemoteModel
     let session: SessionInfo
     let title: String
-    private var running: Bool { model.sessions.first(where: { $0.id == session.id })?.running ?? session.running }
+    @State private var confirmEnd = false
+    private var running: Bool { model.sessions.first(where: { $0.id == session.id })?.running ?? false }
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
                 Label(!running ? L10n.text("Sesión terminada") : !model.hostAvailable ? L10n.text("Esperando al Mac") : !model.ready ? (model.sessionNotice == nil ? L10n.text("Recuperando la sesión…") : L10n.text("No se pudo abrir la sesión")) : model.canWrite ? L10n.text("Estás escribiendo desde el iPhone") : L10n.text("Estás viendo la sesión"), systemImage: model.canWrite ? "keyboard" : "eye")
                     .font(.subheadline.weight(.medium))
-                if let notice = model.sessionNotice, running { InlineNotice(text: notice) }
+                if let notice = model.sessionNotice { InlineNotice(text: notice) }
+                if let expiry = model.selectedInfo?.controlExpiresAt {
+                    Text(L10n.text("Control autorizado hasta") + " " + expiry.formatted(date: .omitted, time: .shortened)).font(.caption)
+                } else if model.ready { Text(L10n.text("Solo lectura. Autoriza el control desde el Mac.")).font(.caption) }
                 if running && model.ready {
                     Button(model.canWrite ? L10n.text("Pasar a solo lectura") : L10n.text("Escribir desde aquí")) {
                         if model.canWrite { model.release() } else { model.claim() }
-                    }.buttonStyle(.bordered).frame(minHeight: 44)
+                    }.buttonStyle(.bordered).frame(minHeight: 44).disabled(!model.canClaim)
                 } else if running {
                     Button(L10n.text("Volver a conectar"), systemImage: "arrow.clockwise") { model.reconnect() }
                         .frame(minHeight: 44)
@@ -186,12 +190,16 @@ struct PhoneTerminal: View {
                     .font(.caption).foregroundStyle(.secondary).padding(10)
             }
         }
+        .confirmationDialog(L10n.text("¿Terminar esta sesión?"), isPresented: $confirmEnd) {
+            Button(L10n.text("Terminar sesión"), role: .destructive) { model.terminate() }
+        }
         .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
         .onAppear { model.attach(session.id) }.onDisappear { model.leave() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button(L10n.text("Reconectar"), systemImage: "arrow.clockwise") { model.reconnect() }
+                    Button(L10n.text("Terminar sesión"), role: .destructive) { confirmEnd = true }.disabled(!model.canTerminate)
                 } label: { Label(L10n.text("Opciones de sesión"), systemImage: "ellipsis.circle") }
             }
         }

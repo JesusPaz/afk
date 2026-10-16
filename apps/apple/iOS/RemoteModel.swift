@@ -24,11 +24,21 @@ final class RemoteModel: ObservableObject {
     private var credentials: ClientCredentials?
     private var subscription: AnyCancellable?
     private var renewal: Timer?
-    var canWrite: Bool { ready && owner == credentials?.clientID }
+    @Published var canCreate = false
+    var selectedInfo: SessionInfo? { sessions.first { $0.id == selected } }
+    var canClaim: Bool { ready && selectedInfo?.canControl == true }
+    var canTerminate: Bool { ready && selectedInfo?.canTerminate == true }
+    var canWrite: Bool { canClaim && owner == credentials?.clientID }
+    private func clearTerminal() {
+        ready = false; owner = ""; epoch = 0; inputSequence = 0
+        _ = feed.reset([], sequence: 0)
+    }
 
     init() {
         relay.onMessage = { [weak self] in self?.receive($0) }
-        relay.onDisconnect = { [weak self] in self?.ready = false; self?.owner = ""; self?.hostAvailable = false }
+        relay.onDisconnect = { [weak self] in
+            self?.clearTerminal(); self?.sessions = []; self?.canCreate = false; self?.hostAvailable = false
+        }
         subscription = relay.$status.sink { [weak self] in self?.status = $0 }
         renewal = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -65,7 +75,7 @@ final class RemoteModel: ObservableObject {
         if selected != id { release(); epoch = 0; inputSequence = 0 }
         selected = id; ready = false; sessionNotice = nil; relay.send(Message("attach", sessionID: id))
     }
-    func claim() { guard ready else { return }; relay.send(Message("claim", sessionID: selected)) }
+    func claim() { guard canClaim else { return }; relay.send(Message("claim", sessionID: selected)) }
     func release() { if canWrite { relay.send(Message("release", sessionID: selected)) }; owner = "" }
     func leave() { release(); selected = nil; ready = false }
     func suspend() { unlock.invalidate(); release(); relay.disconnect(); ready = false; sessions = []; _ = feed.reset([], sequence: 0) }
@@ -85,15 +95,21 @@ final class RemoteModel: ObservableObject {
         inputSequence += 1
         var m = Message("input", sessionID: selected); m.epoch = epoch; m.sequence = inputSequence; m.data = bytes.base64EncodedString(); relay.send(m)
     }
-    func create() { var m = Message("create", sessionID: UUID().uuidString); m.name = L10n.format("Terminal %lld", sessions.count + 1); relay.send(m) }
+    func terminate() { guard canTerminate else { return }; relay.send(Message("terminate", sessionID: selected)) }
+    func create() { guard canCreate else { return }; var m = Message("create", sessionID: UUID().uuidString); m.name = L10n.format("Terminal %lld", sessions.count + 1); relay.send(m) }
     private func receive(_ m: Message) {
         switch m.type {
         case "welcome": relay.send(Message("list"))
         case "hostOnline": hostAvailable = true; relay.send(Message("list")); if let selected { attach(selected) }
         case "hostOffline": hostAvailable = false; ready = false; owner = ""; status = L10n.text("El Mac no está disponible")
-        case "sessions": hostAvailable = true; sessions = m.sessions ?? []
+        case "sessions":
+            hostAvailable = true; sessions = m.sessions ?? []; canCreate = m.canCreate == true
+            if let selected, !sessions.contains(where: { $0.id == selected }) {
+                clearTerminal(); self.selected = nil; sessionNotice = L10n.text("El Mac retiró el acceso a esta sesión.")
+            } else if !canClaim { owner = "" }
+
         case "snapshot":
-            guard m.sessionID == selected, let events = m.events, feed.reset(events, sequence: m.sequence ?? 0) else { return }
+            guard m.sessionID == selected, selectedInfo != nil, let events = m.events, feed.reset(events, sequence: m.sequence ?? 0) else { return }
             owner = m.owner ?? ""; if epoch != m.epoch { inputSequence = 0 }; epoch = m.epoch ?? 0; ready = true; sendSize()
         case "output", "resized":
             guard ready, m.sessionID == selected, let sequence = m.sequence, sequence > feed.sequence else { return }

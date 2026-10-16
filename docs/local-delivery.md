@@ -1,5 +1,31 @@
 # Secure personal beta delivery — 2026-10-16
 
+## Session access controls (current main)
+
+Mac Devices now grants per-device/session read or temporary control, with separate
+creation and closing permissions. Pairing exposes no sessions. Control can be
+preauthorized for 15 minutes, 1 hour or 8 hours, and downgrades after five minutes
+without accepted input after the first claim. Reconnect/heartbeat cannot extend it.
+Read access lasts until removed or AFK stops. Stop-all clears grants and invitations;
+revoke-all also persists removal of trusted devices. Local history keeps 200 metadata
+events. See `security.md` for shell authority and audit limitations.
+
+Validation: 49 Swift tests (48 passed, integration skipped in unit run), separate
+real encrypted PTY integration locally and through public WSS at
+`https://afk.jesuspaz.com`, and Go race/PostgreSQL passed. Coverage includes private
+metadata/output, read-only denials, creation/closing permissions, idle/absolute
+expiry, stale input, reconnect, revoked output, clear-on-revoke iPhone display and
+atomic revoke-all. HTTP `/readyz` is publicly healthy; `/metrics` remains 404 externally.
+The relay image/protocol is unchanged; permissions are enforced on Mac, not by relay.
+
+Current local archives: `.artifacts/secure-delivery/AFKMac-access.xcarchive` (ad hoc)
+and `AFKiOS-access.xcarchive` (unsigned). Mac test ZIP:
+`.artifacts/secure-delivery/AFK-local-macOS-access.zip`. Logs: `.artifacts/access-*.log`.
+Update both native apps to use these controls. Existing running Mac shells were not
+restarted. Physical-device and notarized distribution checks remain pending.
+
+## Relay release and previous delivery
+
 Release: https://github.com/JesusPaz/afk/releases/tag/v0.1.0-rc.2.
 Relay source: `ba164d4` (PR #4); native clients also require the subsequent
 HTTP-upgrade byte-forwarding fix on main. Tracking: #3, owner JesusPaz.
@@ -45,9 +71,10 @@ random and removed afterwards. Keep database credentials out of logs.
 
 ## Remaining manual verification and distribution
 
-Jesus owns Cloudflare DNS/tunnel setup: `afk.jesuspaz.com` →
-`http://traefik.kube-system.svc.cluster.local:80`. Public HTTPS/WSS and physical
-phone biometric/pairing/control/revocation on cellular remain unverified.
+Jesus configured Cloudflare DNS/tunnel setup: `afk.jesuspaz.com` →
+`http://traefik.kube-system.svc.cluster.local:80`. Public HTTPS/WSS integration now
+passes. Physical phone biometric/pairing/control/revocation on cellular remains
+unverified. Metrics remain excluded from ingress.
 
 Developer ID identities exist locally, but signing waits for macOS Keychain
 approval. Notarization and iPhone distribution credentials/provisioning still

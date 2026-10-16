@@ -160,6 +160,7 @@ private struct MacConnectionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
     @State private var revokeID: String?
+    @State private var revokeAll = false
     @State private var copied: String?
 
     var body: some View {
@@ -186,6 +187,9 @@ private struct MacConnectionSheet: View {
         }
         .frame(width: 540)
         .task(id: destination) { await prepare() }
+        .confirmationDialog(L10n.text("¿Revocar todos los dispositivos?"), isPresented: $revokeAll) {
+            Button(L10n.text("Revocar todos los dispositivos"), role: .destructive) { host.revokeAllDevices() }
+        } message: { Text(L10n.text("Todos necesitarán una nueva invitación. Las terminales locales seguirán abiertas.")) }
         .confirmationDialog(L10n.text("¿Revocar el acceso de este iPhone?"), isPresented: Binding(get: { revokeID != nil }, set: { if !$0 { revokeID = nil } })) {
             Button(L10n.text("Revocar acceso"), role: .destructive) {
                 if let id = revokeID { Task { await host.revoke(id) } }
@@ -219,7 +223,7 @@ private struct MacConnectionSheet: View {
                 Button(L10n.text("Volver a intentar")) { Task { await prepare() } }.buttonStyle(.borderedProminent)
             }
         }
-        InstructionRow(number: "3", title: L10n.text("Elige una sesión y toma el control"), detail: L10n.text("Verás la misma salida en ambos dispositivos. Solo uno escribe a la vez."))
+        InstructionRow(number: "3", title: L10n.text("Comparte sesiones desde Dispositivos"), detail: L10n.text("Vincular no da acceso a las terminales. Elige qué compartir y durante cuánto tiempo permitir el control."))
         VStack(alignment: .leading, spacing: 8) {
             LabeledContent(L10n.text("Servidor")) { Text(server).textSelection(.enabled).font(.caption.monospaced()) }
             Text(L10n.text("La invitación incluye este servidor. Para un iPhone físico necesitas HTTPS accesible."))
@@ -265,23 +269,48 @@ private struct MacConnectionSheet: View {
             }.padding(.vertical, 8)
         } else {
             VStack(spacing: 16) {
-                ForEach(host.clients) { client in
-                    HStack(spacing: 12) {
-                        Image(systemName: "iphone").font(.title2).foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(client.name).fontWeight(.medium)
-                            Text(L10n.text("Autorizado para acceder a tus sesiones")).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(L10n.text("Revocar acceso"), role: .destructive) { revokeID = client.id }
-                    }
-                }
+                ForEach(host.clients) { client in deviceRow(client) }
             }
             Button(L10n.text("Vincular otro iPhone"), systemImage: "plus") { destination = .pair }
                 .labelStyle(.titleAndIcon)
         }
         Divider()
+        Text(L10n.text("Las sesiones nuevas son privadas. Los permisos se borran al salir de AFK o cortar el acceso remoto.")).font(.caption).foregroundStyle(.secondary)
+        Button(L10n.text("Cortar todo acceso remoto"), role: .destructive) { host.stopRemoteAccess() }
+        Button(L10n.text("Revocar todos los dispositivos"), role: .destructive) { revokeAll = true }.disabled(host.clients.isEmpty)
+        accessHistory
         AccessToggle(host: host, server: server)
+    }
+
+    private func deviceRow(_ client: PairedClient) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "iphone").font(.title2).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(client.name).fontWeight(.medium)
+                    Text(host.connectedClients.contains(client.id) ? L10n.text("Conectado") : L10n.text("Sin conexión")).font(.caption).foregroundStyle(.secondary)
+                    Text(String(client.id.prefix(8))).font(.caption.monospaced()).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(L10n.text("Revocar acceso"), role: .destructive) { revokeID = client.id }
+            }
+            DevicePermissions(host: host, client: client.id)
+        }
+    }
+    private var accessHistory: some View {
+        DisclosureGroup(L10n.text("Historial de accesos")) {
+            ForEach(Array(host.accessEvents.suffix(30).reversed())) { event in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.text(event.kind.label)).font(.callout)
+                    Text(eventDetails(event)).font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 3)
+            }
+        }
+    }
+    private func eventDetails(_ event: AccessEvent) -> String {
+        var parts = [event.date.formatted(), event.client.map { String($0.prefix(8)) } ?? "Mac"]
+        if let session = event.session { parts.append(String(session.prefix(8))) }
+        return parts.joined(separator: " · ")
     }
 
     private var serverContent: some View {
@@ -391,5 +420,114 @@ struct LocalTerminalPane: View {
         .confirmationDialog(L10n.text("¿Terminar esta sesión?"), isPresented: $confirmEnd) {
             Button(L10n.text("Terminar sesión"), role: .destructive) { session.terminate() }
         } message: { Text(L10n.text("Se cerrará la shell para todos los dispositivos. Esta acción no se puede deshacer.")) }
+    }
+}
+
+private extension AccessEvent.Kind {
+    var label: String {
+        switch self {
+        case .connected: return "Dispositivo conectado"
+        case .disconnected: return "Dispositivo desconectado"
+        case .shared: return "Permisos de sesión modificados"
+        case .creationGranted: return "Creación de sesiones autorizada"
+        case .permissionsRemoved: return "Permisos retirados"
+        case .viewed: return "Sesión consultada"
+        case .controlTaken: return "Control solicitado"
+        case .denied: return "Operación rechazada"
+        case .expired: return "Permiso vencido"
+        case .revoked: return "Dispositivo revocado"
+        case .stopped: return "Acceso remoto detenido"
+        }
+    }
+}
+
+private struct AccessDuration: View {
+    @Binding var seconds: Double
+    var body: some View {
+        Picker(L10n.text("Duración"), selection: $seconds) {
+            Text(L10n.text("15 minutos")).tag(900.0)
+            Text(L10n.text("1 hora")).tag(3600.0)
+            Text(L10n.text("8 horas")).tag(28800.0)
+        }
+    }
+}
+
+private struct DevicePermissions: View {
+    @ObservedObject var host: HostController
+    let client: String
+    @State private var duration = 3600.0
+    @State private var busy = false
+    var body: some View {
+        DisclosureGroup(L10n.text("Sesiones y permisos")) {
+            VStack(alignment: .leading, spacing: 16) {
+                if let last = host.accessEvents.last(where: { $0.client == client && [.connected, .viewed, .controlTaken].contains($0.kind) }) {
+                    Text(L10n.text("Último acceso") + " " + last.date.formatted()).font(.caption)
+                }
+                ForEach(host.sessions) { session in
+                    SessionPermissions(host: host, client: client, session: session)
+                }
+                Divider()
+                Text(L10n.text("Crear terminales desde este dispositivo")).font(.headline)
+                if let expiry = host.access.createUntil(client: client) {
+                    Text(L10n.text("Autorizado hasta") + " " + expiry.formatted()).font(.caption)
+                    Button(L10n.text("Retirar permiso")) { host.setCreation(client: client, duration: nil) }
+                } else { Text(L10n.text("No autorizado")).font(.caption) }
+                AccessDuration(seconds: $duration)
+                Text(L10n.text("Las terminales creadas tendrán control hasta ese mismo vencimiento. Cerrar sesiones requiere otro permiso.")).font(.caption).foregroundStyle(.secondary)
+                Button(L10n.text("Autorizar creación")) {
+                    let requestedDuration = duration, revision = host.accessRevision
+                    Task { busy = true; defer { busy = false }
+                        do {
+                            try await LocalDeviceUnlock().require()
+                            guard host.accessRevision == revision else { return }
+                            host.setCreation(client: client, duration: requestedDuration)
+                        }
+                        catch { host.error = error.localizedDescription }
+                    }
+                }.disabled(busy)
+            }.padding(.vertical, 8)
+        }
+    }
+}
+
+private struct SessionPermissions: View {
+    @ObservedObject var host: HostController
+    let client: String
+    let session: HostSession
+    @State private var level = SessionAccess.none
+    @State private var duration = 3600.0
+    @State private var allowClose = false
+    @State private var busy = false
+    private var current: SessionAccess { host.access.level(client: client, session: session.id) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(session.name).font(.headline)
+            Text(current == .none ? L10n.text("Privada para este dispositivo") : current == .readOnly ? L10n.text("Solo lectura") : L10n.text("Control autorizado")).font(.caption)
+            if let expiry = host.access.controlUntil(client: client, session: session.id) {
+                Text(L10n.text("Control autorizado hasta") + " " + expiry.formatted()).font(.caption)
+            }
+            if host.access.canClose(client: client, session: session.id) { Text(L10n.text("Puede cerrar esta sesión")).font(.caption) }
+            Picker(L10n.text("Acceso"), selection: $level) {
+                Text(L10n.text("Sin acceso")).tag(SessionAccess.none)
+                Text(L10n.text("Solo lectura")).tag(SessionAccess.readOnly)
+                Text(L10n.text("Control temporal")).tag(SessionAccess.control)
+            }
+            if level != .none {
+                Toggle(L10n.text("Permitir cerrar esta sesión"), isOn: $allowClose)
+                if level == .control || allowClose { AccessDuration(seconds: $duration) }
+                Text(L10n.text("El control vuelve a solo lectura tras 5 minutos sin entrada. Leer sigue permitido hasta retirar el acceso o cerrar AFK.")).font(.caption).foregroundStyle(.secondary)
+            }
+            Button(L10n.text("Aplicar permisos")) {
+                let requestedLevel = level, requestedDuration = duration, requestedClose = allowClose, revision = host.accessRevision
+                Task { busy = true; defer { busy = false }
+                    do {
+                        if requestedLevel != .none { try await LocalDeviceUnlock().require() }
+                        guard host.accessRevision == revision else { return }
+                        host.setAccess(client: client, session: session.id, level: requestedLevel, duration: requestedDuration, allowClose: requestedClose)
+                    } catch { host.error = error.localizedDescription }
+                }
+            }.disabled(busy)
+        }.padding(12).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+        .onAppear { level = current; allowClose = host.access.canClose(client: client, session: session.id) }
     }
 }

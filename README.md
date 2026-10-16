@@ -38,9 +38,9 @@ AFK connects to the saved relay when the Mac app opens, unless remote access was
 
 1. On Mac, a local shell opens immediately. Choose **Vincular iPhone**.
 2. On iPhone, choose **Vincular Mac** and paste the secure invitation copied from the Mac.
-3. Open a session. It starts read-only; choose **Tomar control** to type.
+3. On Mac, open **Dispositivos → Sesiones y permisos** and explicitly share sessions. Pairing alone exposes none. Choose read-only or temporary control (15 minutes, 1 hour, 8 hours); creation and closing are separate permissions. On iPhone, open a shared session and take control if allowed.
 4. On Mac, choose **Recuperar control** (`⌘⇧L`) to write locally again.
-5. Manage linked phones under **Dispositivos**. Revocation disconnects that device and invalidates its saved credential.
+5. Manage linked phones and access history under **Dispositivos**. Five minutes without accepted input downgrades control to read-only. **Cortar todo acceso remoto** clears session grants; revocation also removes device trust. Both leave local terminals running. Grants are cleared when AFK quits.
 
 The secure invitation expires in five minutes and works once. Saved device credentials live in Keychain. A physical iPhone requires signing with your own Apple development team and a reachable **HTTPS** relay; localhost on a physical iPhone is the phone itself. The personal beta relay is deployed on Helena; its public Cloudflare route is configured separately.
 

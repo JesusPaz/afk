@@ -16,7 +16,24 @@ or universally more secure than another product.
 - Local revocation precedes network revocation. Persistence failures disconnect.
   No automatic replacement of an identity, legacy fallback or uncertain input replay.
 - The host validates the authorized certificate on every application packet, then
-  applies exclusive input ownership, epoch and sequence checks.
+  enforces explicit per-device/session permissions before exclusive input ownership,
+  epoch and sequence checks. Pairing grants no session visibility or shell access.
+- New sessions are private. Read, temporary control, timed creation and timed closing
+  permissions are distinct. Both session lists and every output/control event are
+  filtered locally. An authorized creator receives control only of its new session,
+  until the original creation deadline, with no permission to close it.
+- Control lasts 15 minutes, 1 hour or 8 hours as selected on Mac; 5 minutes without
+  accepted input after the first claim downgrades to read-only. Heartbeats, resize,
+  repeated claims and reconnects cannot extend that idle window or the absolute
+  deadline. Clock checks use wall time and monotonic uptime. Read access remains
+  until explicitly removed, all access is stopped, or the Mac process exits.
+- Mac device-owner authentication gates permission grants. Offline phones can be
+  authorized in advance. Disconnect releases control; grants stay bounded by their
+  original deadlines. Stopping access clears all grants and pending invitations;
+  revoke-all atomically persists device removal. Neither action closes local shells.
+- A local, bounded history retains the last 200 authorization/access/security events
+  across launches, with timestamps and device/session IDs, never terminal content.
+  It is not tamper-proof auditing against a compromised Mac user account.
 - Bounded HTTP bodies, TLS application packets, WebSocket frames, queues, peers,
   traffic rates and connection lifetime. Native-only WebSocket origins, no cookies,
   no automatic redirects or compression. Binary opaque relay traffic only.
@@ -41,9 +58,12 @@ timing and ciphertext lengths, and can deny service; it cannot be made availabil
 trusted by encryption. Registration abuse is rate/budget limited, not eliminated.
 The single-instance limiter sees the TCP peer, which may be a shared reverse proxy.
 
-Every authorized phone can create, read and terminate every AFK shell. Shells run
-as the Mac user and can access that user's files and credentials; there are no
-per-session or command-level permissions. The phone does not expose a remote shell.
+Controlling even one shared shell runs commands as the Mac user and can access
+that user's files and credentials, including other processes. Per-session permissions
+are access controls, not OS isolation or command-level restrictions. Closing permission
+only gates AFK's close action: a controller can still run `exit` or kill processes.
+Read-only access can expose secrets printed by that session. The phone does not
+expose a remote shell. No VM or sandbox is introduced by these controls.
 Apple, SwiftTerm, NIO/BoringSSL and shell programs remain part of the trusted base.
 Terminal replay is in RAM; OS crash reports, swap and shell history are separate.
 No secure memory-erasure guarantee is made.

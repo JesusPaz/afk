@@ -128,6 +128,12 @@ public struct HostTrustState: Codable {
         next.peers.append(TrustedDevice(id: id, name: name, certificate: certificate)); next.pending = nil
         try save(next); state = next
     }
+    public func cancelInvitation() throws {
+        var next = state; next.pending = nil; try save(next); state = next
+    }
+    public func revokeAll() throws {
+        var next = state; next.peers = []; next.pending = nil; try save(next); state = next
+    }
     public func revoke(_ id: String) throws {
         var next = state; next.peers.removeAll { $0.id == id }; next.pending = nil
         try save(next); state = next

@@ -33,6 +33,25 @@ import Security
         XCTAssertEqual(host.relay.clients.count, 1)
         // The terminal is a real PTY; only the authenticated phone can take its lease.
         let session = try XCTUnwrap(host.create(name: "Secure integration"))
+        phone.send(Message("attach", sessionID: session.id))
+        try await until { received.contains { $0.type == "error" } }
+        XCTAssertFalse(received.contains { $0.sessionID == session.id && ["snapshot", "output"].contains($0.type) })
+        XCTAssertFalse(received.contains { $0.sessions?.contains { $0.id == session.id } == true })
+        host.setAccess(client: saved.credentials.clientID, session: session.id, level: .readOnly)
+        try await until { received.contains { $0.sessions?.contains { $0.id == session.id && $0.canControl == false } == true } }
+        received = []
+        phone.send(Message("claim", sessionID: session.id))
+        try await until { received.contains { $0.type == "error" } }
+        XCTAssertEqual(session.lease.owner, "local")
+        received = []
+        phone.send(Message("create", sessionID: UUID().uuidString))
+        try await until { received.contains { $0.type == "error" } }
+        XCTAssertEqual(host.sessions.count, 1)
+        received = []
+        phone.send(Message("terminate", sessionID: session.id))
+        try await until { received.contains { $0.type == "error" } }
+        XCTAssertTrue(session.running)
+        host.setAccess(client: saved.credentials.clientID, session: session.id, level: .control)
         phone.send(Message("claim", sessionID: session.id))
         try await until { session.lease.owner == saved.credentials.clientID }
         var input = Message("input", sessionID: session.id)
@@ -60,6 +79,8 @@ import Security
         second.onMessage = { secondMessages.append($0) }
         let secondSaved = try await second.pair(invitation: XCTUnwrap(host.pairing).secret)
         try await until { secondMessages.contains { $0.type == "welcome" } }
+        XCTAssertFalse(secondMessages.contains { $0.sessions?.contains { $0.id == session.id } == true })
+        host.setAccess(client: secondSaved.credentials.clientID, session: session.id, level: .control)
         second.send(Message("attach", sessionID: session.id))
         try await until { secondMessages.contains { $0.type == "snapshot" } }
         second.send(Message("claim", sessionID: session.id))
@@ -72,6 +93,24 @@ import Security
         second.send(resize)
         try await until { session.feed.size.columns == 91 }
         XCTAssertFalse(secondMessages.contains { $0.data.flatMap { Data(base64Encoded: $0) }.map { String(decoding: $0, as: UTF8.self).contains("FORBIDDEN_STALE_OWNER") } ?? false })
+        // Removing read access immediately stops future output, not only snapshots.
+        received = []
+        host.setAccess(client: saved.credentials.clientID, session: session.id, level: .none)
+        try await until { received.contains { $0.type == "sessions" && $0.sessions?.isEmpty == true } }
+        // Earlier frames can already be in flight; the ordered permission update is the boundary.
+        received = []
+        var afterRemoval = Message("input", sessionID: session.id)
+        afterRemoval.epoch = session.lease.epoch; afterRemoval.sequence = 2
+        afterRemoval.data = Data("printf POST_REMOVAL_MARKER\n".utf8).base64EncodedString()
+        second.send(afterRemoval)
+        try await until { secondMessages.contains { $0.data.flatMap { Data(base64Encoded: $0) }.map { String(decoding: $0, as: UTF8.self).contains("POST_REMOVAL_MARKER") } ?? false } }
+        XCTAssertFalse(received.contains { $0.sessionID == session.id && ["output", "snapshot", "resized", "control"].contains($0.type) })
+        host.setAccess(client: saved.credentials.clientID, session: session.id, level: .control)
+        // A peer cannot forge lifecycle events reserved for the authenticated transport.
+        second.send(Message("clientConnected"))
+        try await until { !host.connectedClients.contains(secondSaved.credentials.clientID) }
+        second.connect()
+        try await until { host.connectedClients.contains(secondSaved.credentials.clientID) }
         await host.revoke(secondSaved.credentials.clientID)
         phone.disconnect(); received = []
         _ = try phone.restore(); phone.connect()

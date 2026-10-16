@@ -73,8 +73,11 @@ and each connection. Backgrounding invalidates pending local authentication,
 closes transport, and clears visible terminal contents. A privacy overlay hides
 content while inactive. Late HTTP/TLS results cannot reopen a suspended generation.
 No remote configuration, clipboard synchronization, file-transfer endpoint or
-system-wide phone control is exposed. A paired phone can access all AFK shells;
-that is full authority as the Mac user, not a sandboxed command permission.
+system-wide phone control is exposed. Pairing grants no shell permissions. The Mac explicitly shares individual sessions
+per device, filters all outgoing events and validates each requested operation.
+Temporary control and separate creation/closing grants are bounded locally; see
+`security.md`. Controlling a shared shell still executes as the Mac user, without
+OS isolation or command filtering.
 
 ## Verification
 

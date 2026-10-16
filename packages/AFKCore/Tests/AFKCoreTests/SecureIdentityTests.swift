@@ -62,6 +62,26 @@ import NIOSSL
         let fresh = try trust.invitation(server: "https://example.com", host: host)
         XCTAssertThrowsError(try trust.authorize(id: UUID().uuidString, name: "Phone", certificate: peer.certificate, invitationID: fresh.id, secret: fresh.secret, now: fresh.expires))
     }
+    func testStopInvalidatesInvitationAndRevokeAllPersistsAtomically() throws {
+        var saved: HostTrustState?
+        var fail = false
+        let trust = HostTrustStore(state: HostTrustState(identity: try DeviceIdentity.create()), save: {
+            if fail { throw SecureError.persistence }; saved = $0
+        })
+        let invite = try trust.invitation(server: "https://example.com", host: host)
+        try trust.cancelInvitation()
+        XCTAssertNil(saved?.pending)
+        XCTAssertThrowsError(try trust.authorize(id: UUID().uuidString, name: "Phone", certificate: DeviceIdentity.create().certificate, invitationID: invite.id, secret: invite.secret))
+        let next = try trust.invitation(server: "https://example.com", host: host)
+        let id = UUID().uuidString, peer = try DeviceIdentity.create()
+        try trust.authorize(id: id, name: "Phone", certificate: peer.certificate, invitationID: next.id, secret: next.secret)
+        fail = true
+        XCTAssertThrowsError(try trust.revokeAll()); XCTAssertEqual(trust.state.peers.count, 1)
+        fail = false; try trust.revokeAll()
+        let restored = HostTrustStore(state: try XCTUnwrap(saved), save: { _ in })
+        XCTAssertTrue(restored.state.peers.isEmpty)
+        XCTAssertThrowsError(try restored.authorize(id: id, name: "Phone", certificate: peer.certificate, invitationID: nil, secret: nil))
+    }
     func testRevocationPersistenceFailureKeepsStateConsistent() throws {
         var fail = false
         let trust = HostTrustStore(state: HostTrustState(identity: try DeviceIdentity.create()), save: { _ in if fail { throw SecureError.persistence } })
