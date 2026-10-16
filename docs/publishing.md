@@ -1,8 +1,8 @@
 # Publishing AFK
 
-Updated 2026-10-15: the relay beta is released and deployed from local builds; see
-[delivery evidence](local-delivery.md). Apple signing, TestFlight and Homebrew remain
-pending. Tracks [MVP #3](https://github.com/JesusPaz/afk/issues/3).
+Updated 2026-10-16: the relay beta is released and deployed from local builds; see
+[delivery evidence](local-delivery.md) for current Mac signing/notarization status.
+TestFlight and Homebrew remain pending. Tracks [MVP #3](https://github.com/JesusPaz/afk/issues/3).
 Owner for activation and all external prerequisites: **JesusPaz**.
 
 Testa (`~/personal/cefalea-app`, GitHub `JesusPaz/testa`) is the workflow reference:
@@ -67,9 +67,11 @@ For Apple:
    out of Testa's EAS setup or put them in Git or chat.
 4. Set up an internal TestFlight group in AFK's app record. Upload success means Apple
    accepted the transfer; processing and adding the build to a tester group happen next.
-5. Confirm current Apple agreements and export-compliance answers. This POC declares
-   no non-exempt encryption: TLS and platform authentication only, no custom E2EE.
-   Revisit this declaration when E2EE is implemented.
+5. Confirm current Apple agreements and export-compliance answers. AFK now uses
+   end-to-end TLS 1.3 implemented by bundled NIO/BoringSSL as well as Apple
+   cryptography APIs. Review the existing `ITSAppUsesNonExemptEncryption` value
+   against the current implementation before TestFlight/App Store submission;
+   the earlier pre-E2EE rationale no longer describes this application.
 
 The generated blue pixel-wordmark icon is **provisional beta artwork**. Source:
 `scripts/release/make-beta-icon.py`; RGB PNGs have no alpha. Review/replace it before
@@ -78,7 +80,36 @@ manifest: app preferences (`CA92.1`), elapsed control-lease timing (`35F9.1`), a
 SwiftTerm's file metadata access within the iOS app container (`C617.1`). Review the
 privacy report when changing SwiftTerm. App Store privacy labels and a public privacy
 policy remain a separate review: the relay persists device names, IDs and token hashes,
-and can see terminal traffic. Do not claim that no data is collected or that AFK is E2EE.
+and sees encrypted traffic metadata. It does not receive terminal plaintext or
+device private keys. Do not claim that no data is collected.
+
+## Local Mac distribution
+
+Local builds can use an installed Developer ID identity and a validated `notarytool`
+Keychain profile; exporting the signing key to GitHub is not required. Do not run
+`scripts/release/apple.sh` on the developer login keychain: it is runner-only.
+
+1. Select a tested commit and an unused explicit release tag. Set numeric marketing
+   and build versions, the public HTTPS relay URL, both `arm64 x86_64` architectures,
+   and `ENABLE_HARDENED_RUNTIME=YES` for the Release archive.
+2. Compile the archive with ad-hoc signing for build-time helper tools if necessary.
+   Export with `xcodebuild -exportArchive`, method `developer-id`, destination
+   `export`, manual signing and the installed Developer ID certificate/team. The
+   exported application must be Developer ID signed, not ad hoc.
+3. Verify `codesign --verify --deep --strict`, both executable architectures,
+   hardened runtime, secure timestamp, bundle versions and embedded relay URL.
+4. ZIP the app with `ditto -c -k --keepParent`. Submit using
+   `xcrun notarytool submit <zip> --keychain-profile <profile>`. Store its submission
+   ID; inspect status/logs and wait for **Accepted**, never infer success from upload.
+5. Run `xcrun stapler staple <app>`, `xcrun stapler validate <app>` and
+   `spctl --assess --type execute <app>`. Recreate the distribution ZIP after stapling,
+   calculate SHA-256 and publish those exact bytes to the release at the tested SHA.
+
+Keychain can require the Mac user's local approval when codesign accesses the
+private key. Do not reset the keychain or change its access controls to avoid that
+approval. Keep API private keys out of Git, logs and release assets. A credential
+shared with another app requires authorization before retrieving/reusing it;
+notarizing AFK must not revoke or reconfigure that app's credentials.
 
 ## Build numbering and endpoint
 

@@ -1,5 +1,21 @@
 # Secure personal beta delivery — 2026-10-16
 
+## Notarized Mac distribution
+
+Release [v0.1.0-rc.3](https://github.com/JesusPaz/afk/releases/tag/v0.1.0-rc.3)
+contains `AFK-v0.1.0-rc.3-macOS.zip`, `SHA256SUMS` and `source.json`.
+Built locally from `1f19e02142dd1aa731b593454c922162472a550e` (CI passed),
+version 0.1.0 (3), macOS 14+, universal arm64/x86_64, public HTTPS relay.
+Developer ID signature, hardened runtime, secure timestamp and both architectures
+verified. Apple notarization `0238457b-5864-484d-a912-781c4eceb5b6` was Accepted;
+stapling/validation passed and Gatekeeper accepted `Notarized Developer ID`.
+The distribution ZIP was recreated after stapling. SHA-256:
+`3bb1af00b067984f2407d6bfc3f6ec6aa223775aa62295cb5fc1d6a47445c18d`.
+
+Download and extract the ZIP, then move AFK.app to Applications. Save existing shell
+work before quitting/replacing AFK. iPhone distribution and physical-device checks
+remain pending; the relay remains on rc.2.
+
 ## Session access controls (current main)
 
 Mac Devices now grants per-device/session read or temporary control, with separate
@@ -22,7 +38,8 @@ Current local archives: `.artifacts/secure-delivery/AFKMac-access.xcarchive` (ad
 and `AFKiOS-access.xcarchive` (unsigned). Mac test ZIP:
 `.artifacts/secure-delivery/AFK-local-macOS-access.zip`. Logs: `.artifacts/access-*.log`.
 Update both native apps to use these controls. Existing running Mac shells were not
-restarted. Physical-device and notarized distribution checks remain pending.
+restarted. Physical-device checks remain pending; the signed distribution above
+supersedes the ad-hoc Mac ZIP.
 
 ## Relay release and previous delivery
 
@@ -76,9 +93,8 @@ Jesus configured Cloudflare DNS/tunnel setup: `afk.jesuspaz.com` →
 passes. Physical phone biometric/pairing/control/revocation on cellular remains
 unverified. Metrics remain excluded from ingress.
 
-Developer ID identities exist locally, but signing waits for macOS Keychain
-approval. Notarization and iPhone distribution credentials/provisioning still
-need completion; no signed installer or TestFlight build has been published.
+Mac Developer ID signing and notarized ZIP distribution are complete. AFK iPhone
+registration/provisioning and TestFlight distribution remain pending.
 
 See `security.md`, `e2ee.md`, and `security-rustdesk.md` for threat boundaries,
 negative tests and the source-based RustDesk comparison. This is not an
