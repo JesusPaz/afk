@@ -35,15 +35,19 @@ func TestRealSwiftPTY(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := &store.Store{DB: db}
-	app := New(st)
-	srv := httptest.NewServer(app.Handler())
-	defer srv.Close()
-	defer app.Hub.Close()
+	relayURL := os.Getenv("AFK_TEST_RELAY_URL")
+	if relayURL == "" {
+		app := New(st)
+		srv := httptest.NewServer(app.Handler())
+		defer srv.Close()
+		defer app.Hub.Close()
+		relayURL = srv.URL
+	}
 	id, token := store.RandomToken(27), store.RandomToken(32)
 	defer db.Exec(context.Background(), "DELETE FROM hosts WHERE id=$1", id)
 	cmd := exec.Command(binary)
 	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "AFK_HOST_ID="+id, "AFK_HOST_TOKEN="+token, "AFK_SERVER="+srv.URL, "SHELL=/bin/sh")
+	cmd.Env = append(os.Environ(), "AFK_HOST_ID="+id, "AFK_HOST_TOKEN="+token, "AFK_SERVER="+relayURL, "SHELL=/bin/sh")
 	if err = cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +78,7 @@ func TestRealSwiftPTY(t *testing.T) {
 		t.Helper()
 		h := http.Header{}
 		h.Set("Authorization", "Bearer "+c.Token)
-		ws, _, e := websocket.Dial(ctx, strings.Replace(srv.URL, "http", "ws", 1)+"/v1/connect", &websocket.DialOptions{HTTPHeader: h})
+		ws, _, e := websocket.Dial(ctx, strings.Replace(relayURL, "http", "ws", 1)+"/v1/connect", &websocket.DialOptions{HTTPHeader: h})
 		if e != nil {
 			t.Fatal(e)
 		}

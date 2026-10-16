@@ -1,7 +1,8 @@
 # Publishing AFK
 
-Prepared locally on 2026-10-15. No Git commit, push, tag, release, store submission,
-Homebrew PR or deployment has been made by this work. Tracks [MVP #3](https://github.com/JesusPaz/afk/issues/3).
+Updated 2026-10-15: the relay beta is released and deployed from local builds; see
+[delivery evidence](local-delivery.md). Apple signing, TestFlight and Homebrew remain
+pending. Tracks [MVP #3](https://github.com/JesusPaz/afk/issues/3).
 Owner for activation and all external prerequisites: **JesusPaz**.
 
 Testa (`~/personal/cefalea-app`, GitHub `JesusPaz/testa`) is the workflow reference:

@@ -42,7 +42,7 @@ AFK connects to the saved relay when the Mac app opens, unless remote access was
 4. On Mac, choose **Recuperar control** (`⌘⇧L`) to write locally again.
 5. Manage linked phones under **Dispositivos**. Revocation disconnects that device and invalidates its saved credential.
 
-The temporary password expires in five minutes and works once. Saved device credentials live in Keychain. A physical iPhone requires signing with your own Apple development team and a reachable **HTTPS** trusted relay; localhost on a physical iPhone is the phone itself. No default public relay is deployed by this repository.
+The temporary password expires in five minutes and works once. Saved device credentials live in Keychain. A physical iPhone requires signing with your own Apple development team and a reachable **HTTPS** trusted relay; localhost on a physical iPhone is the phone itself. The personal beta relay is deployed on Helena; its public Cloudflare route is configured separately.
 
 The checked-in Xcode project is generated from `apps/apple/project.yml` using XcodeGen 2.46.0. Regenerate with `xcodegen generate --spec apps/apple/project.yml` after changing project configuration.
 
@@ -75,7 +75,7 @@ The unsigned commands above are compile checks. To **run** the iPhone simulator 
 - Sessions survive closing the Mac window, **not quitting AFK, reboot or sleep with an active network connection**. There is no separate background helper yet.
 - Manual reconnect. No offline keystroke queue or automatic retries of input.
 - SwiftUI screens implement the functional flows; final visual polish and accessibility/device validation remain.
-- No E2EE, QR pairing, signed installer, App Store release, public relay deployment, accounts, file transfer, audio, screen mirroring, Android, Windows or Linux host.
+- No E2EE, QR pairing, signed installer, App Store release, accounts, file transfer, audio, screen mirroring, Android, Windows or Linux host.
 
 See [architecture](docs/architecture.md), [protocol](docs/protocol.md), [roadmap](docs/roadmap.md). MIT licensed.
 
@@ -87,4 +87,4 @@ Shared UI, accessibility and error translations live in `packages/AFKCore/Source
 
 ## Distribution
 
-GitHub Actions workflows prepare relay images in GHCR, signed/notarized macOS releases, Homebrew tap updates and internal TestFlight uploads. See [publishing and required credentials](docs/publishing.md). These pipelines are prepared locally; no release or public relay has been deployed yet.
+GitHub Actions workflows prepare relay images in GHCR, signed/notarized macOS releases, Homebrew tap updates and internal TestFlight uploads. See [publishing and required credentials](docs/publishing.md). The personal relay beta `v0.1.0-rc.1` is published and deployed on Helena. See [local delivery and test evidence](docs/local-delivery.md); Apple signing and TestFlight remain pending.
