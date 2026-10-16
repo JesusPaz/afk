@@ -69,12 +69,13 @@ For Apple:
    accepted the transfer; processing and adding the build to a tester group happen next.
 5. Confirm current Apple agreements and export-compliance answers. AFK now uses
    end-to-end TLS 1.3 implemented by bundled NIO/BoringSSL as well as Apple
-   cryptography APIs. Review the existing `ITSAppUsesNonExemptEncryption` value
-   against the current implementation before TestFlight/App Store submission;
-   the earlier pre-E2EE rationale no longer describes this application.
+   cryptography APIs. The plist deliberately omits `ITSAppUsesNonExemptEncryption` so App Store
+   Connect requests the encryption questionnaire for the actual implementation.
+   Do not claim exemption based on the earlier pre-E2EE implementation.
 
-The generated blue pixel-wordmark icon is **provisional beta artwork**. Source:
-`scripts/release/make-beta-icon.py`; RGB PNGs have no alpha. Review/replace it before
+The shared retro keyboard icon source is `apps/apple/Artwork/retro-keyboard.png`.
+Run `python3 scripts/release/make-beta-icon.py` on macOS to regenerate all catalog
+sizes; PNGs have no alpha. Review it before
 public branding. Both platforms include an asset catalog and required-reason privacy
 manifest: app preferences (`CA92.1`), elapsed control-lease timing (`35F9.1`), and
 SwiftTerm's file metadata access within the iOS app container (`C617.1`). Review the
