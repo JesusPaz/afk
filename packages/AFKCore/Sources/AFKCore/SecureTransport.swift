@@ -179,7 +179,10 @@ private final class SecureRecords: ChannelInboundHandler, @unchecked Sendable {
                     let config = NIOTypedHTTPClientUpgradeConfiguration(upgradeRequestHead: request, upgraders: [upgrader], notUpgradingCompletionHandler: { channel in
                         channel.close(promise: nil); return channel.eventLoop.makeFailedFuture(SecureError.protocolViolation)
                     })
-                    let result = try channel.pipeline.syncOperations.configureUpgradableHTTPClientPipeline(configuration: .init(upgradeConfiguration: config))
+                    var pipeline = NIOUpgradableHTTPClientPipelineConfiguration(upgradeConfiguration: config)
+                    // The relay may send the first TLS frame in the same read as HTTP 101.
+                    pipeline.leftOverBytesStrategy = .forwardBytes
+                    let result = try channel.pipeline.syncOperations.configureUpgradableHTTPClientPipeline(configuration: pipeline)
                     let timeout = channel.eventLoop.scheduleTask(in: .seconds(15)) { channel.close(promise: nil) }
                     result.whenComplete { _ in timeout.cancel() }
                     return result

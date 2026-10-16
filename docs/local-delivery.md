@@ -1,63 +1,58 @@
-# Personal beta delivery — 2026-10-15
+# Secure personal beta delivery — 2026-10-16
 
-Release: https://github.com/JesusPaz/afk/releases/tag/v0.1.0-rc.1.
-Source: `854b60d`; tracking and remaining physical-device work: #3 (JesusPaz).
+Release: https://github.com/JesusPaz/afk/releases/tag/v0.1.0-rc.2.
+Relay source: `ba164d4` (PR #4); native clients also require the subsequent
+HTTP-upgrade byte-forwarding fix on main. Tracking: #3, owner JesusPaz.
 
-## Delivered
+## Delivered and verified
 
-- Relay built **locally** for linux/amd64 and linux/arm64. Release assets contain
-  both `docker save` archives and `relay-SHA256SUMS`.
-- `publish-local.yml` only verifies checksums, loads those images, and pushes them;
-  it does not compile the relay. This first delivery's saved image tag is
-  `ghcr.io/jesuspaz/afk-relay:local-20261015`.
-- Public image, anonymous access verified:
-  `ghcr.io/jesuspaz/afk-relay@sha256:3482fbe70f99f5371d66ed23b1a7f856a176b644cc26f6c26484e879bc4d13f1`.
-- Personal homelab manifests: `JesusPaz/homelab`, commit `1d7db23`,
-  `infrastructure/afk-relay`. Relay and PostgreSQL run on helena in namespace `afk`,
-  with a bound 5 GiB PVC. Argo application: `afk-relay`, manual sync.
+- Relay compiled locally for linux/amd64 and linux/arm64. Release contains Docker
+  archives and SHA256 checksums; Actions only loaded and published those archives.
+- Public image (anonymous access verified for both architectures):
+  `ghcr.io/jesuspaz/afk-relay@sha256:688fce7144115ddbed27c1ab93b60ba8325ebdec68b53b333e8849301b876ecc`.
+- Personal homelab PR #64 merged; Argo synced `bcf90ba`, Healthy, relay 1/1.
+  Two initial database migration startup failures recovered; no subsequent restart
+  during integration verification. PostgreSQL data/PVC preserved.
+- Protocol v2: end-to-end mutual TLS 1.3, exact device pins, single-use expiring
+  invitation, Keychain persistence, local authorization and revocation. Legacy v1
+  endpoints are disabled. HTTPS uses validated WSS; insecure HTTP is loopback-only.
+- `/healthz` reports protocol 2, `/readyz` checks the database. `/metrics` is
+  internal-only, with aggregate counters/gauges and pod scrape annotations.
+  LAN ingress readiness passed; ingress `/metrics` returned 404.
+- Swift: 38 tests, 37 passed and the environment-dependent integration skipped in
+  the unit run. Integration passed separately against the deployed relay and real
+  PostgreSQL: two native encrypted peers, real PTY, wrong-origin/preauthorization
+  rejection, single-use pairing, stale owner, resize, reconnect and revocation.
+- Local Go race/PostgreSQL tests, go vet, five packaging tests, actionlint and
+  govulncheck passed (no known vulnerabilities). CI for `ba164d4` passed.
+- Deployment exposed a native HTTP-upgrade race: a WebSocket frame coalesced with
+  HTTP 101 was discarded. Main forwards leftover bytes and includes a regression
+  test. No relay rebuild is required for this native-client correction.
 
-## Verification
+## Local artifacts
 
-Passed locally: 13 Swift tests, Go race with PostgreSQL and a real Swift PTY/two
-clients, `go vet`, 5 packaging tests, actionlint, and Mac/iPhone Release archives.
-CI also passed for the release source. Mac and iPhone Simulator builds use ad-hoc
-signing; the physical-iPhone archive is unsigned and is not installable as-is.
+Ignored local directory `.artifacts/secure-delivery/` contains:
 
-Repeated `TestRealSwiftPTY` against the **deployed** relay and database through
-loopback port forwards: fanout, control transfer, stale-owner rejection, real
-terminal resize, replay and shell exit passed. Test identities are cleaned up.
-`AFK_TEST_RELAY_URL` selects an existing relay for this test; set
-`AFK_TEST_DATABASE_URL` to that relay's database and `AFK_TEST_HOST_BINARY` to the
-local Swift host. With no relay override the test starts its own isolated relay.
+- `AFKMac-final.xcarchive`: current Release Mac archive, ad-hoc signed.
+- `AFKiOS.xcarchive`: current unsigned Release iPhone archive, not installable as-is.
+- `relay-linux-amd64.tar.gz`, `relay-linux-arm64.tar.gz`, `relay-SHA256SUMS`.
 
-Ingress check passed:
+Build/test logs: `.artifacts/secure-*.log`. The earlier `.artifacts/delivery/`
+artifacts are obsolete v1 clients. Existing Mac app/shells were not restarted.
+Run `scripts/test-secure.sh` for real native integration; `AFK_TEST_RELAY_URL` and
+`AFK_TEST_DATABASE_URL` select an existing relay/database. Test identities are
+random and removed afterwards. Keep database credentials out of logs.
 
-```sh
-curl --fail -H 'Host: afk.jesuspaz.com' http://192.168.1.43/readyz
-```
+## Remaining manual verification and distribution
 
-The relay restarted twice during initial database startup, then became ready.
+Jesus owns Cloudflare DNS/tunnel setup: `afk.jesuspaz.com` →
+`http://traefik.kube-system.svc.cluster.local:80`. Public HTTPS/WSS and physical
+phone biometric/pairing/control/revocation on cellular remain unverified.
 
-## Local artifacts for tomorrow
+Developer ID identities exist locally, but signing waits for macOS Keychain
+approval. Notarization and iPhone distribution credentials/provisioning still
+need completion; no signed installer or TestFlight build has been published.
 
-All paths are relative to the AFK checkout and are intentionally ignored by Git:
-
-- `.artifacts/delivery/AFK-local-macOS.zip`: runnable development build, ad-hoc signed.
-- `.artifacts/delivery/AFKMac.xcarchive`: Release Mac archive.
-- `.artifacts/delivery/AFKiOS.xcarchive`: unsigned Release physical-iPhone archive.
-- `.artifacts/DeliverySimulator/Build/Products/Debug-iphonesimulator/AFK.app`:
-  runnable iPhone Simulator build.
-- `.artifacts/delivery/`: build/test logs and relay release archives.
-
-All three app builds embed `https://afk.jesuspaz.com`. Existing saved preferences
-still take precedence. No existing Mac app or terminal sessions were restarted.
-
-## Remaining manual steps
-
-Jesus owns Cloudflare setup: add `afk.jesuspaz.com` to the homelab tunnel, pointing
-to `http://traefik.kube-system.svc.cluster.local:80`, with its proxied DNS record.
-Then verify HTTPS `/readyz` and pairing/control/revocation from an iPhone on cellular.
-Public HTTPS/WebSocket routing was not verified before this manual configuration.
-
-Apple Developer signing, TestFlight, notarization and Homebrew distribution are
-separate unfinished work. The relay remains a trusted personal beta without E2EE.
+See `security.md`, `e2ee.md`, and `security-rustdesk.md` for threat boundaries,
+negative tests and the source-based RustDesk comparison. This is not an
+independent audit or proof that AFK is as secure as RustDesk overall.
