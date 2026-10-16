@@ -132,3 +132,44 @@ func (s *Store) Revoke(ctx context.Context, hostID, clientID string) error {
 	_, err := s.DB.Exec(ctx, `UPDATE clients SET revoked_at=now() WHERE host_id=$1 AND id=$2`, hostID, clientID)
 	return err
 }
+
+// RegisterClient grants transport access only. The Mac separately authorizes the TLS identity.
+func (s *Store) RegisterClient(ctx context.Context, id, token, code, name string) (Host, error) {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return Host{}, err
+	}
+	defer tx.Rollback(ctx)
+	var h Host
+	err = tx.QueryRow(ctx, "SELECT id,code,name FROM hosts WHERE code=$1 FOR UPDATE", code).Scan(&h.ID, &h.Code, &h.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Host{}, ErrUnauthorized
+	}
+	if err != nil {
+		return Host{}, err
+	}
+	var hash []byte
+	var hostID string
+	var revoked *time.Time
+	err = tx.QueryRow(ctx, "SELECT host_id,token_hash,revoked_at FROM clients WHERE id=$1", id).Scan(&hostID, &hash, &revoked)
+	if err == nil {
+		if hostID != h.ID || revoked != nil || subtle.ConstantTimeCompare(hash, Hash(token)) != 1 {
+			return Host{}, ErrUnauthorized
+		}
+	} else if errors.Is(err, pgx.ErrNoRows) {
+		var count int
+		if err = tx.QueryRow(ctx, "SELECT count(*) FROM clients WHERE host_id=$1", h.ID).Scan(&count); err != nil {
+			return Host{}, err
+		}
+		if count >= 64 {
+			return Host{}, ErrUnauthorized
+		}
+		_, err = tx.Exec(ctx, "INSERT INTO clients(id,host_id,name,token_hash) VALUES($1,$2,$3,$4)", id, h.ID, name, Hash(token))
+		if err != nil {
+			return Host{}, err
+		}
+	} else {
+		return Host{}, err
+	}
+	return h, tx.Commit(ctx)
+}

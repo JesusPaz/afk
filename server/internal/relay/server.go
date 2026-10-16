@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -16,10 +17,12 @@ import (
 )
 
 type Server struct {
-	Store    *store.Store
-	Hub      *Hub
-	mu       sync.Mutex
-	attempts map[string]bucket
+	Store       *store.Store
+	Hub         *Hub
+	Tunnels     *Tunnels
+	AllowLegacy bool
+	mu          sync.Mutex
+	attempts    map[string]bucket
 }
 type bucket struct {
 	start time.Time
@@ -27,7 +30,7 @@ type bucket struct {
 }
 
 func New(s *store.Store) *Server {
-	return &Server{Store: s, Hub: NewHub(), attempts: map[string]bucket{}}
+	return &Server{Store: s, Hub: NewHub(), Tunnels: NewTunnels(), attempts: map[string]bucket{}}
 }
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -94,7 +97,7 @@ func (s *Server) identity(w http.ResponseWriter, r *http.Request, role string) (
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]int{"protocol": 1}) })
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]int{"protocol": 2}) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 		defer cancel()
@@ -104,7 +107,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, 200, map[string]bool{"ready": true})
 	})
-	mux.HandleFunc("POST /v1/hosts", func(w http.ResponseWriter, r *http.Request) {
+	registerHost := func(w http.ResponseWriter, r *http.Request) {
 		var b struct {
 			ID    string `json:"id"`
 			Name  string `json:"name"`
@@ -127,7 +130,9 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, 200, h)
-	})
+	}
+	mux.HandleFunc("POST /v1/hosts", registerHost)
+	mux.HandleFunc("POST /v2/hosts", registerHost)
 	mux.HandleFunc("POST /v1/pairing", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := s.identity(w, r, "host")
 		if !ok {
@@ -176,7 +181,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, 200, c)
 	})
-	mux.HandleFunc("DELETE /v1/clients/{id}", func(w http.ResponseWriter, r *http.Request) {
+	revokeClient := func(w http.ResponseWriter, r *http.Request) {
 		id, ok := s.identity(w, r, "host")
 		if !ok {
 			return
@@ -187,8 +192,11 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		s.Hub.Revoke(id.ID, clientID)
+		s.Tunnels.Revoke(id.ID, clientID)
 		w.WriteHeader(204)
-	})
+	}
+	mux.HandleFunc("DELETE /v1/clients/{id}", revokeClient)
+	mux.HandleFunc("DELETE /v2/clients/{id}", revokeClient)
 	mux.HandleFunc("GET /v1/connect", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Origin") != "" {
 			fail(w, 403, "native clients only")
@@ -209,8 +217,33 @@ func (s *Server) Handler() http.Handler {
 			return err == nil
 		})
 	})
+	s.tunnelHandlers(mux)
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		m := &s.Tunnels.metrics
+		values := []struct {
+			name, kind, help string
+			value            any
+		}{
+			{"afk_relay_requests_total", "counter", "HTTP requests including probes.", m.requests.Load()},
+			{"afk_relay_host_connections", "gauge", "Connected host control channels.", m.connections.Load()},
+			{"afk_relay_tunnels", "gauge", "Pending and active encrypted tunnels.", m.tunnels.Load()},
+			{"afk_relay_frames_total", "counter", "Forwarded opaque binary frames.", m.frames.Load()},
+			{"afk_relay_bytes_total", "counter", "Forwarded opaque payload bytes.", m.bytes.Load()},
+			{"afk_relay_rejected_total", "counter", "Rejected malformed or capacity limited tunnel requests.", m.rejected.Load()},
+		}
+		for _, v := range values {
+			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s %s\n%s %v\n", v.name, v.help, v.name, v.kind, v.name, v.value)
+		}
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && !s.allowed(r) {
+		s.Tunnels.metrics.requests.Add(1)
+		if strings.HasPrefix(r.URL.Path, "/v1/") && !s.AllowLegacy {
+			fail(w, 426, "protocol upgrade required")
+			return
+		}
+
+		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && r.URL.Path != "/metrics" && !s.allowed(r) {
 			fail(w, 429, "too many requests")
 			return
 		}

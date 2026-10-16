@@ -1,26 +1,63 @@
 # Security boundary
 
-This is a local developer proof of concept, not a hardened remote shell product. Do not expose it as a public multi-tenant service.
+AFK v2 is a personal beta with end-to-end encrypted terminal transport. It has not
+had an independent security audit. See [protocol and tests](e2ee.md) and the
+[RustDesk comparison](security-rustdesk.md). Do not describe it as production-ready
+or universally more secure than another product.
 
-## Implemented
+## Enforced controls
 
-- Crypto-random 256-bit bearer credentials; PostgreSQL holds SHA-256 hashes, not raw credentials. Hashing is suitable here because these are random high-entropy tokens, not human passwords.
-- Crypto-random 128-bit pairing secret, five-minute validity and atomic single use.
-- Keychain storage on Apple devices. Credential-free URLs, Authorization headers and redirect refusal.
-- Native clients require HTTPS except exact loopback hosts. Relay binds to loopback by default; PostgreSQL also binds to loopback.
-- Per-IP request throttling, bounded payloads / queues, authenticated sender assignment and cross-host routing isolation.
-- Revocation persists across restart and cancels active connections. Pausing remote access disconnects the Mac host; local sessions continue.
-- No terminal data, passwords or bearer credentials intentionally logged by AFK. No automatic terminal link opening or OSC clipboard integration.
-- Pending input is discarded on disconnect. Input needs the current lease epoch and a fresh sequence.
+- Mutual TLS 1.3 between pinned device identities, inside CA-verified WSS/TLS 1.3.
+  Missing/changed identities fail closed. The relay cannot grant shell access.
+- Local 256-bit, five-minute, single-use invitation; five persisted attempts.
+  Authorization and invitation consumption commit atomically before acknowledgement.
+- Device-only Keychain identity persistence. Device-owner authentication gates
+  invitation creation on Mac and pairing/reconnection in the iPhone UI.
+- Local revocation precedes network revocation. Persistence failures disconnect.
+  No automatic replacement of an identity, legacy fallback or uncertain input replay.
+- The host validates the authorized certificate on every application packet, then
+  applies exclusive input ownership, epoch and sequence checks.
+- Bounded HTTP bodies, TLS application packets, WebSocket frames, queues, peers,
+  traffic rates and connection lifetime. Native-only WebSocket origins, no cookies,
+  no automatic redirects or compression. Binary opaque relay traffic only.
+- PostgreSQL stores SHA-256 hashes of random transport tokens, not private keys,
+  invitation capabilities or terminal contents. Metrics contain only aggregate
+  counters/gauges, with no device labels, token values or terminal text.
+- iPhone backgrounding closes remote access and clears terminal display memory.
+  No automatic links, OSC clipboard integration or remote configuration endpoint.
 
-## Not implemented yet
+## Remaining boundaries
 
-The relay **can read and modify terminal traffic** and sees pairing credentials in transit through its process. TLS is transport encryption, not E2EE. The current password is a random enrollment secret, not an encrypted authenticated handshake. A compromised trusted relay can impersonate peers. Every paired device has access to all AFK sessions, including session creation / termination. There are no per-session permissions.
+A compromised operating system, injected process or stolen private device key is
+outside this protection. Device keys are exportable to the TLS process, not Secure
+Enclave-backed. Keychain accessibility and local UI authentication are not a claim
+of hardware-backed non-exportability. Biometrics must be verified on physical
+hardware; a person who knows the device passcode can pass device-owner authentication.
 
-A production release needs an independently reviewed E2EE protocol with device verification, key rotation, replay defenses and recovery rules; signed/notarized Mac distribution; background agent lifecycle; abuse protection and operational monitoring. Do not implement custom cryptography to bridge this gap.
+Only share invitations through a channel you trust. A stolen unused invitation
+allows enrollment during its short lifetime. Pairing currently uses explicit copy /
+paste, not QR scanning. The relay sees host/client routing metadata, addresses,
+timing and ciphertext lengths, and can deny service; it cannot be made availability-
+trusted by encryption. Registration abuse is rate/budget limited, not eliminated.
+The single-instance limiter sees the TCP peer, which may be a shared reverse proxy.
 
-The rate limiter is in-memory and uses the TCP peer address. There is no trusted-proxy configuration or distributed limiter; putting this behind an arbitrary proxy is not production deployment guidance. Device registration and room creation are not globally quota-managed.
+Every authorized phone can create, read and terminate every AFK shell. Shells run
+as the Mac user and can access that user's files and credentials; there are no
+per-session or command-level permissions. The phone does not expose a remote shell.
+Apple, SwiftTerm, NIO/BoringSSL and shell programs remain part of the trusted base.
+Terminal replay is in RAM; OS crash reports, swap and shell history are separate.
+No secure memory-erasure guarantee is made.
 
-Mac terminal content is held in RAM; Apple / third-party shell software may separately keep shell history or logs. SwiftTerm and the OS are part of the trusted computing base. Shell subprocesses are user processes, not sandboxed workloads. Quitting AFK closes the PTY and requests shell termination; detached child jobs are not a managed job tree.
+Identity certificates expire after five years and fail closed. Automatic key
+rotation, recovery and device migration are not implemented: re-pair deliberately;
+never accept a changed fingerprint automatically. Reinstall/Keychain deletion can
+require new enrollment. Unattended background host lifecycle, signed/notarized
+public distribution, independent review, sustained fuzz/load tests, physical-device
+validation and tested backup/restore remain release gates owned by @JesusPaz in #3.
 
-There are no distributed binaries or production vulnerability-response guarantees yet. Report bugs without including credentials or private terminal output.
+## Reporting and monitoring
+
+Report security issues privately to the maintainer without credentials or terminal
+content. `/healthz` is process liveness, `/readyz` checks PostgreSQL, and `/metrics`
+is Prometheus text with aggregate transport activity and rejects. Keep metrics
+internal to the homelab; probes do not prove that a particular phone is authorized.

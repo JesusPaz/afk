@@ -158,3 +158,21 @@
 "server.revocation unavailable" = "No se pudo revocar el acceso. Vuelve a intentarlo.";
 "server.native clients only" = "Conéctate desde la app AFK.";
 "server.too many requests" = "Demasiados intentos. Espera un momento y vuelve a intentarlo.";
+
+// Secure device pairing
+"Mostrar la invitación segura para vincular un iPhone" = "Mostrar la invitación segura para vincular un iPhone";
+"Pega la invitación segura" = "Pega la invitación segura";
+"Copia la invitación que aparece en tu Mac." = "Copia la invitación que aparece en tu Mac.";
+"Copia la invitación segura del Mac y pégala aquí. Incluye la identidad del Mac y el servidor." = "Copia la invitación segura del Mac y pégala aquí. Incluye la identidad del Mac y el servidor.";
+"Invitación segura" = "Invitación segura";
+"La invitación dura cinco minutos y solo se puede usar una vez." = "La invitación dura cinco minutos y solo se puede usar una vez.";
+"El Mac verifica tu dispositivo. La terminal viaja cifrada de extremo a extremo." = "El Mac verifica tu dispositivo. La terminal viaja cifrada de extremo a extremo.";
+"Copia la invitación segura y pégala en el iPhone." = "Copia la invitación segura y pégala en el iPhone.";
+"Comparte esta invitación" = "Comparte esta invitación";
+"Preparando invitación segura…" = "Preparando invitación segura…";
+"Invitación vencida" = "Invitación vencida";
+"La invitación incluye este servidor. Para un iPhone físico necesitas HTTPS accesible." = "La invitación incluye este servidor. Para un iPhone físico necesitas HTTPS accesible.";
+"Se desconectará. Para volver a entrar necesitará una nueva invitación segura." = "Se desconectará. Para volver a entrar necesitará una nueva invitación segura.";
+"Vincúlalo con una invitación segura para ver y controlar las sesiones de este Mac." = "Vincúlalo con una invitación segura para ver y controlar las sesiones de este Mac.";
+"La terminal viaja cifrada de extremo a extremo. Las sesiones se ejecutan en tu Mac y terminan al salir de AFK." = "La terminal viaja cifrada de extremo a extremo. Las sesiones se ejecutan en tu Mac y terminan al salir de AFK.";
+"Confirma tu identidad para autorizar el acceso a la terminal del Mac." = "Confirma tu identidad para autorizar el acceso a la terminal del Mac.";

@@ -103,7 +103,7 @@ struct MacWorkspace: View {
                     }.fixedSize()
                 }
                 .buttonStyle(.borderedProminent)
-                .help(L10n.text("Mostrar el código y la contraseña para vincular un iPhone"))
+                .help(L10n.text("Mostrar la invitación segura para vincular un iPhone"))
                 .accessibilityIdentifier("pair-iphone")
             }
         }
@@ -142,7 +142,7 @@ private struct MacSessionRow: View {
 
 private struct RemoteAccessStatus: View {
     @ObservedObject var host: HostController
-    @ObservedObject var relay: RelayClient
+    @ObservedObject var relay: SecureHostRelay
     private var title: String {
         if host.remoteAccessPaused { return L10n.text("Acceso remoto pausado") }
         if host.connecting || relay.status == L10n.text("Conectando…") { return L10n.text("Conectando…") }
@@ -191,27 +191,25 @@ private struct MacConnectionSheet: View {
                 if let id = revokeID { Task { await host.revoke(id) } }
                 revokeID = nil
             }
-        } message: { Text(L10n.text("Se desconectará. Para volver a entrar necesitará un nuevo código y contraseña.")) }
+        } message: { Text(L10n.text("Se desconectará. Para volver a entrar necesitará una nueva invitación segura.")) }
     }
 
     @ViewBuilder private var pairingContent: some View {
         InstructionRow(number: "1", title: L10n.text("Abre AFK en tu iPhone"), detail: L10n.text("Pulsa «Vincular Mac» en la pantalla de inicio."))
         VStack(alignment: .leading, spacing: 16) {
-            InstructionRow(number: "2", title: L10n.text("Introduce estos datos"), detail: L10n.text("El código identifica este Mac. La contraseña autoriza el vínculo."))
+            InstructionRow(number: "2", title: L10n.text("Comparte esta invitación"), detail: L10n.text("Copia la invitación segura y pégala en el iPhone."))
             if busy {
-                HStack(spacing: 12) { ProgressView().controlSize(.small); Text(L10n.text("Preparando código y contraseña…")).foregroundStyle(.secondary) }
+                HStack(spacing: 12) { ProgressView().controlSize(.small); Text(L10n.text("Preparando invitación segura…")).foregroundStyle(.secondary) }
                     .frame(maxWidth: .infinity, minHeight: 128)
-            } else if let identity = host.host, let pairing = host.pairing, host.error == nil {
+            } else if host.host != nil, let pairing = host.pairing, host.error == nil {
                 VStack(alignment: .leading, spacing: 16) {
-                    credential(L10n.text("Código del Mac"), value: identity.code, large: true)
-                    Divider()
-                    credential(L10n.text("Contraseña temporal"), value: pairing.secret, large: false)
+                    credential(L10n.text("Invitación segura"), value: pairing.secret, large: false)
                 }
                 .padding(20).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let seconds = remaining(pairing.expiresAt, now: context.date)
                     HStack {
-                        Label(seconds > 0 ? L10n.format("Válida durante %@ · un solo uso", String(format: "%d:%02d", seconds / 60, seconds % 60)) : L10n.text("Contraseña vencida"), systemImage: "clock")
+                        Label(seconds > 0 ? L10n.format("Válida durante %@ · un solo uso", String(format: "%d:%02d", seconds / 60, seconds % 60)) : L10n.text("Invitación vencida"), systemImage: "clock")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Button(L10n.text("Generar otra")) { Task { await prepare() } }.disabled(busy)
@@ -224,9 +222,9 @@ private struct MacConnectionSheet: View {
         InstructionRow(number: "3", title: L10n.text("Elige una sesión y toma el control"), detail: L10n.text("Verás la misma salida en ambos dispositivos. Solo uno escribe a la vez."))
         VStack(alignment: .leading, spacing: 8) {
             LabeledContent(L10n.text("Servidor")) { Text(server).textSelection(.enabled).font(.caption.monospaced()) }
-            Text(L10n.text("Usa esta misma dirección en el iPhone. En un teléfono físico, localhost apunta al teléfono; necesitas un servidor HTTPS accesible."))
+            Text(L10n.text("La invitación incluye este servidor. Para un iPhone físico necesitas HTTPS accesible."))
                 .font(.caption).foregroundStyle(.secondary)
-            Text(L10n.text("Versión de pruebas: el servidor puede leer la terminal. Usa únicamente un servidor de confianza."))
+            Text(L10n.text("El Mac verifica tu dispositivo. La terminal viaja cifrada de extremo a extremo."))
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -235,13 +233,20 @@ private struct MacConnectionSheet: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title).font(.caption).foregroundStyle(.secondary)
-                Text(value).font(large ? .system(size: 30, weight: .medium, design: .monospaced) : .system(size: 16, weight: .medium, design: .monospaced))
-                    .textSelection(.enabled).accessibilityLabel("\(title): \(value)")
+                Text(value.hasPrefix("AFK2:") ? "AFK2:…" : value).font(large ? .system(size: 30, weight: .medium, design: .monospaced) : .system(size: 16, weight: .medium, design: .monospaced))
+                    .textSelection(.enabled).accessibilityLabel(title)
             }
             Spacer(minLength: 0)
             Button {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(value, forType: .string)
+                NSPasteboard.general.setData(Data(), forType: .init("org.nspasteboard.ConcealedType"))
+                NSPasteboard.general.setData(Data(), forType: .init("org.nspasteboard.TransientType"))
+                let change = NSPasteboard.general.changeCount
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(300))
+                    if NSPasteboard.general.changeCount == change { NSPasteboard.general.clearContents() }
+                }
                 copied = title
             } label: {
                 Label(copied == title ? L10n.text("Copiado") : L10n.text("Copiar"), systemImage: copied == title ? "checkmark" : "doc.on.doc")
@@ -255,7 +260,7 @@ private struct MacConnectionSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: "iphone").font(.largeTitle).foregroundStyle(.secondary)
                 Text(L10n.text("Tu primer iPhone empieza aquí.")).font(.headline)
-                Text(L10n.text("Vincúlalo con un código y una contraseña para ver y controlar las sesiones de este Mac.")).foregroundStyle(.secondary)
+                Text(L10n.text("Vincúlalo con una invitación segura para ver y controlar las sesiones de este Mac.")).foregroundStyle(.secondary)
                 Button(L10n.text("Vincular iPhone")) { destination = .pair }.buttonStyle(.borderedProminent)
             }.padding(.vertical, 8)
         } else {
@@ -294,7 +299,7 @@ private struct MacConnectionSheet: View {
             RemoteAccessStatus(host: host, relay: host.relay)
             Divider()
             Text(L10n.text("Versión de pruebas")).font(.headline)
-            Text(L10n.text("Sin cifrado de extremo a extremo todavía. El servidor debe ser de confianza. Las sesiones se ejecutan en tu Mac y terminan al salir de AFK."))
+            Text(L10n.text("La terminal viaja cifrada de extremo a extremo. Las sesiones se ejecutan en tu Mac y terminan al salir de AFK."))
                 .foregroundStyle(.secondary)
         }
     }
@@ -304,9 +309,13 @@ private struct MacConnectionSheet: View {
         if destination == .server { return }
         busy = true; copied = nil; host.error = nil
         defer { busy = false }
+        if destination == .devices { await host.refreshClients(server: server); return }
         if !host.relay.connected { await host.connect(server: server) }
         guard host.error == nil else { return }
-        if destination == .pair { await host.makePairing() }
+        if destination == .pair {
+            do { try await LocalDeviceUnlock().require(); await host.makePairing() }
+            catch { host.error = error.localizedDescription }
+        }
         else { await host.refreshClients() }
     }
 
@@ -321,7 +330,7 @@ private struct MacConnectionSheet: View {
 
 private struct AccessToggle: View {
     @ObservedObject var host: HostController
-    @ObservedObject var relay: RelayClient
+    @ObservedObject var relay: SecureHostRelay
     let server: String
     @State private var busy = false
     init(host: HostController, server: String) {

@@ -17,9 +17,10 @@ public enum SecretStore {
     public static func write<T: Encodable>(_ value: T, account: String) throws {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.jesuspaz.afk.poc", kSecAttrAccount as String: account]
         let data = try JSONEncoder().encode(value)
-        let result = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        let accessible = account.hasPrefix("secure-phone-") ? kSecAttrAccessibleWhenUnlockedThisDeviceOnly : kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let result = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data, kSecAttrAccessible as String: accessible] as CFDictionary)
         if result == errSecItemNotFound {
-            var insert = query; insert[kSecValueData as String] = data; insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            var insert = query; insert[kSecValueData as String] = data; insert[kSecAttrAccessible as String] = accessible
             guard SecItemAdd(insert as CFDictionary, nil) == errSecSuccess else { throw AFKError.message(L10n.text("No se pudo guardar el vínculo en el llavero.")) }
         } else if result != errSecSuccess { throw AFKError.message(L10n.text("No se pudo actualizar el llavero.")) }
     }

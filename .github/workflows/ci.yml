@@ -44,6 +44,8 @@ jobs:
         working-directory: server
       - run: go vet ./...
         working-directory: server
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        working-directory: server
   apple:
     runs-on: macos-15
     steps:

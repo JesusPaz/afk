@@ -4,9 +4,13 @@
 
 Local real PTY, native Mac/iPhone targets, shared Swift core, Go relay, PostgreSQL registration and pairing, Keychain credentials, exclusive input ownership, bounded stream replay, linked-device revocation and local development scripts.
 
+## Implemented in v2
+
+Pinned mutual TLS 1.3 over WSS, local one-use invitations, persistent Keychain authorization, offline local revocation, local device-owner authentication, adversarial TLS tests, real encrypted PTY integration, and relay health/readiness/Prometheus metrics. See [security evidence](e2ee.md).
+
 ## Before an internet-access MVP
 
-1. E2EE threat model, reviewed transport design, authenticated device identity and recovery.
+1. Independent review of the implemented E2EE protocol, hardware-backed key feasibility, explicit rotation/recovery and physical-device validation. [RustDesk comparison](security-rustdesk.md).
 2. Separate Mac background host, restart semantics and signed/notarized installation.
 3. Authoritative terminal-state snapshots, reconnection backoff and explicit resynchronization.
 4. QR pairing, full approved visual system, clear disconnected / expired / revoked states, VoiceOver and Dynamic Type validation.

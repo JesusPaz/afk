@@ -2,7 +2,7 @@
 
 Your terminal, with you. Native macOS and iPhone apps sharing a real shell running on your Mac.
 
-**Developer POC — not a production remote-access service.** This version uses a trusted relay that can read terminal traffic. End-to-end encryption, signed distribution and unattended operation are required before a public service. See [security and boundaries](docs/security.md).
+**Personal beta — not independently audited.** Device transport v2 uses end-to-end mutual TLS 1.3 inside WSS, local one-use enrollment and persistent device authorization. Signed distribution and independent security review remain release gates. See [security and boundaries](docs/security.md).
 
 ## Monorepo
 
@@ -20,7 +20,7 @@ One shell runs on the Mac. Both apps render the same output; only the current co
 
 ## Run locally
 
-Requires macOS 14+, Xcode 26.3 (including its Metal Toolchain and an iOS simulator runtime), Go 1.25.7+, Docker Compose and Python 3. iPhone target: iOS 17+. Dependencies are locked in `go.sum` and `Package.resolved`.
+Requires macOS 14+, Xcode 26.3 (including its Metal Toolchain and an iOS simulator runtime), Go 1.26.9+, Docker Compose and Python 3. iPhone target: iOS 17+. Dependencies are locked in `go.sum` and `Package.resolved`.
 
 ```sh
 ./scripts/setup-dev.sh
@@ -37,12 +37,12 @@ AFK sessions advertise `TERM=xterm-256color`, `COLORTERM=truecolor` and `TERM_PR
 AFK connects to the saved relay when the Mac app opens, unless remote access was explicitly paused. Pausing persists across launches. Development builds signed ad hoc may ask for Keychain authorization again after recompilation; use a consistent Apple signing identity for a stable development identity.
 
 1. On Mac, a local shell opens immediately. Choose **Vincular iPhone**.
-2. On iPhone, choose **Vincular Mac** and enter the Mac code and temporary password.
+2. On iPhone, choose **Vincular Mac** and paste the secure invitation copied from the Mac.
 3. Open a session. It starts read-only; choose **Tomar control** to type.
 4. On Mac, choose **Recuperar control** (`⌘⇧L`) to write locally again.
 5. Manage linked phones under **Dispositivos**. Revocation disconnects that device and invalidates its saved credential.
 
-The temporary password expires in five minutes and works once. Saved device credentials live in Keychain. A physical iPhone requires signing with your own Apple development team and a reachable **HTTPS** trusted relay; localhost on a physical iPhone is the phone itself. The personal beta relay is deployed on Helena; its public Cloudflare route is configured separately.
+The secure invitation expires in five minutes and works once. Saved device credentials live in Keychain. A physical iPhone requires signing with your own Apple development team and a reachable **HTTPS** relay; localhost on a physical iPhone is the phone itself. The personal beta relay is deployed on Helena; its public Cloudflare route is configured separately.
 
 The checked-in Xcode project is generated from `apps/apple/project.yml` using XcodeGen 2.46.0. Regenerate with `xcodegen generate --spec apps/apple/project.yml` after changing project configuration.
 
@@ -52,10 +52,10 @@ The checked-in Xcode project is generated from `apps/apple/project.yml` using Xc
 swift test
 ./scripts/test-server.sh
 swift build
-AFK_TEST_HOST_BINARY="$PWD/.build/debug/afk-host" ./scripts/test-server.sh
+./scripts/test-secure.sh
 ```
 
-The last command starts a real Swift PTY host, routes its output to two clients, checks control transfer / stale-input rejection, replays history and exits the shell. PostgreSQL tests use unique identities and remove their records. Without `AFK_TEST_DATABASE_URL`, direct `go test` skips database tests; the script configures the local database.
+The last command runs a real Swift PTY with two mutually authenticated, encrypted clients and checks pairing, control, stale-input rejection, resize, replay, reconnection and revocation. PostgreSQL tests use unique identities and remove their records. Without `AFK_TEST_DATABASE_URL`, direct `go test` skips database tests; the script configures the local database.
 
 Native build checks:
 
@@ -75,7 +75,7 @@ The unsigned commands above are compile checks. To **run** the iPhone simulator 
 - Sessions survive closing the Mac window, **not quitting AFK, reboot or sleep with an active network connection**. There is no separate background helper yet.
 - Manual reconnect. No offline keystroke queue or automatic retries of input.
 - SwiftUI screens implement the functional flows; final visual polish and accessibility/device validation remain.
-- No E2EE, QR pairing, signed installer, App Store release, accounts, file transfer, audio, screen mirroring, Android, Windows or Linux host.
+- No QR pairing, signed installer, App Store release, accounts, file transfer, audio, screen mirroring, Android, Windows or Linux host.
 
 See [architecture](docs/architecture.md), [protocol](docs/protocol.md), [roadmap](docs/roadmap.md). MIT licensed.
 

@@ -1,4 +1,6 @@
-# POC protocol v1
+# Historical POC protocol v1
+
+**Disabled in the shipped v2 relay.** Retained as historical protocol documentation and regression tests. Current protocol: [device transport v2](e2ee.md).
 
 HTTP uses JSON. WebSocket `/v1/connect` uses JSON **text** frames. Bearer tokens travel in Authorization headers. The server rejects browser Origin headers; AFK currently supports native clients only.
 

@@ -37,6 +37,8 @@ func TestPostgresAndRelay(t *testing.T) {
 	}
 	st := &store.Store{DB: db}
 	app := New(st)
+	app.AllowLegacy = true
+	defer app.Tunnels.Close()
 	server := httptest.NewServer(app.Handler())
 	defer server.Close()
 	defer app.Hub.Close()
