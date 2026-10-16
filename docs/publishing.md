@@ -112,6 +112,28 @@ approval. Keep API private keys out of Git, logs and release assets. A credentia
 shared with another app requires authorization before retrieving/reusing it;
 notarizing AFK must not revoke or reconfigure that app's credentials.
 
+## Local iPhone / TestFlight
+
+AFK has its own App Store Connect record, `AFK Remote Terminal` (ID `6823806445`),
+with bundle `com.jesuspaz.afk.ios`. The `AFK Internal` group is internal-only and
+has no public invitation link. Do not use Testa's bundle or provisioning profile.
+
+For local distribution, use the installed Apple Distribution identity and AFK's
+App Store provisioning profile. Compile a Release archive for
+`generic/platform=iOS`, setting the public HTTPS relay URL and a new numeric build
+number. An unsigned archive can be exported with manual distribution signing.
+Use export options `method=app-store-connect`, `destination=export`,
+`signingStyle=manual`, `signingCertificate=Apple Distribution`, the team ID and
+`provisioningProfiles` mapping AFK's bundle to its installed profile UUID. Set
+`manageAppVersionAndBuildNumber=false` and `testFlightInternalTestingOnly=true`.
+
+Check the resulting IPA's identifier, version, relay endpoint and icon. Repeat
+`xcodebuild -exportArchive` with `destination=upload`, API authentication key path,
+key ID/issuer and `-allowProvisioningUpdates`. Keep any temporary API key private
+and remove it when finished. Do not run the ephemeral-runner signing script on
+the login keychain. Apple upload success is separate from processing, encryption
+review and assignment to the internal test group. Only invite testers Jesus names.
+
 ## Build numbering and endpoint
 
 The tag supplies Apple's numeric marketing version (`v0.1.0-rc.2` → `0.1.0`).

@@ -1,5 +1,27 @@
 # Secure personal beta delivery — 2026-10-16
 
+## Retro icon and first TestFlight upload
+
+Source `056f7c936915a3a9461cf4b5bb918fda1a635872` adds the shared retro keyboard
+icon and removes the obsolete encryption-exemption declaration so App Store
+Connect asks for the current encryption questionnaire. All 11 opaque RGB icon
+sizes and five release-packaging tests passed; both local Release archives passed.
+
+Mac [v0.1.0-rc.4](https://github.com/JesusPaz/afk/releases/tag/v0.1.0-rc.4),
+version 0.1.0 (4), is universal and locally built. Developer ID/runtime/timestamp,
+Apple notarization Accepted (`47b2271e-621b-4b61-a0e6-51f95beb84c7`), stapling and
+Gatekeeper passed. ZIP SHA-256:
+`7dfa4134d230d2c0cc5102fcc32ef7ef71d32e877ea2cf1deff137191e44f2cd`.
+
+The same version/build for iPhone was exported with AFK's own Apple Distribution
+identity and App Store profile, and uploaded successfully to `AFK Remote Terminal`
+(App Store Connect `6823806445`) on 2026-10-16. Internal-only upload; group
+`AFK Internal` created without a public link or third-party invitations.
+Apple processing returned `VALID`; internal state is `MISSING_EXPORT_COMPLIANCE`.
+Test instructions were added. Assigning the build to the internal group was
+rejected until the encryption questionnaire is completed; tester assignment is
+still pending. Logs/artifacts: `.artifacts/retro-release/`.
+
 ## Notarized Mac distribution
 
 Release [v0.1.0-rc.3](https://github.com/JesusPaz/afk/releases/tag/v0.1.0-rc.3)
@@ -94,7 +116,8 @@ passes. Physical phone biometric/pairing/control/revocation on cellular remains
 unverified. Metrics remain excluded from ingress.
 
 Mac Developer ID signing and notarized ZIP distribution are complete. AFK iPhone
-registration/provisioning and TestFlight distribution remain pending.
+registration/provisioning, upload and processing are complete; TestFlight
+encryption review and tester assignment remain pending.
 
 See `security.md`, `e2ee.md`, and `security-rustdesk.md` for threat boundaries,
 negative tests and the source-based RustDesk comparison. This is not an
