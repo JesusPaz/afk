@@ -11,3 +11,9 @@ xcuserdata/
 *.log
 server/relay
 .claude-context
+
+__pycache__/
+dist/
+*.p12
+*.p8
+*.mobileprovision

@@ -130,9 +130,17 @@ func TestRealSwiftPTY(t *testing.T) {
 			break
 		}
 	}
+	// Resize shares the lease's command sequence and output event ordering.
+	send(wb, Message{Type: "resize", SessionID: sid, Epoch: leaseB.Epoch, Sequence: 1, Columns: 39, Rows: 30})
+	resized := read(wa, "resized")
+	if resized.Columns != 39 || resized.Rows != 30 {
+		t.Fatal("wrong resize")
+	}
+	send(wa, Message{Type: "resize", SessionID: sid, Epoch: leaseA.Epoch, Sequence: 2, Columns: 120, Rows: 40})
+	send(wb, Message{Type: "resize", SessionID: sid, Epoch: leaseB.Epoch, Sequence: 2, Columns: 0, Rows: 40})
 	// If stale input runs, its marker will appear in the replay below.
 	send(wa, Message{Type: "input", SessionID: sid, Epoch: leaseA.Epoch, Sequence: 1, Data: base64.StdEncoding.EncodeToString([]byte("printf 'STALE_INPUT_RAN\\n'\n"))})
-	send(wb, Message{Type: "input", SessionID: sid, Epoch: leaseB.Epoch, Sequence: 1, Data: base64.StdEncoding.EncodeToString([]byte("printf 'AFK_%s\\n' 'PTY_OK'\n"))})
+	send(wb, Message{Type: "input", SessionID: sid, Epoch: leaseB.Epoch, Sequence: 2, Data: base64.StdEncoding.EncodeToString([]byte("stty size; printf 'AFK_%s\\n' 'PTY_OK'\n"))})
 	for _, ws := range []*websocket.Conn{wa, wb} {
 		output := ""
 		for !strings.Contains(output, "AFK_PTY_OK") {
@@ -146,12 +154,35 @@ func TestRealSwiftPTY(t *testing.T) {
 	}
 	send(wa, Message{Type: "attach", SessionID: sid})
 	snapshot := read(wa, "snapshot")
-	data, _ := base64.StdEncoding.DecodeString(snapshot.Data)
+	var events []struct {
+		Data []byte `json:"data"`
+		Size *struct {
+			Columns int `json:"columns"`
+			Rows    int `json:"rows"`
+		} `json:"size"`
+	}
+	if err := json.Unmarshal(snapshot.Events, &events); err != nil {
+		t.Fatal(err)
+	}
+	var data []byte
+	resizeCount := 0
+	for _, event := range events {
+		data = append(data, event.Data...)
+		if event.Size != nil {
+			resizeCount++
+			if event.Size.Columns != 39 {
+				t.Fatal("unauthorized resize")
+			}
+		}
+	}
+	if resizeCount != 1 || snapshot.Columns != 39 || !strings.Contains(string(data), "30 39") {
+		t.Fatal("PTY geometry or replay incorrect")
+	}
 	if !strings.Contains(string(data), "AFK_PTY_OK") || strings.Contains(string(data), "STALE_INPUT_RAN") {
 		t.Fatal("incorrect replay")
 	}
 	// Close the real PTY cleanly, not just the test host process.
-	send(wb, Message{Type: "input", SessionID: sid, Epoch: leaseB.Epoch, Sequence: 2, Data: base64.StdEncoding.EncodeToString([]byte("exit\n"))})
+	send(wb, Message{Type: "input", SessionID: sid, Epoch: leaseB.Epoch, Sequence: 3, Data: base64.StdEncoding.EncodeToString([]byte("exit\n"))})
 	read(wb, "exit")
 	t.Log("real PTY, two-client fanout, stale-owner rejection, replay and shell exit passed")
 }

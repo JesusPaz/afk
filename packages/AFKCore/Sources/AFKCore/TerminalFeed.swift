@@ -1,21 +1,64 @@
 import Foundation
+import Combine
+
+public struct TerminalSize: Codable, Equatable {
+    public let columns: Int
+    public let rows: Int
+    public init(columns: Int, rows: Int) { self.columns = columns; self.rows = rows }
+    public static let initial = TerminalSize(columns: 80, rows: 24)
+    public var isValid: Bool { (2...400).contains(columns) && (2...200).contains(rows) }
+}
+
+public struct TerminalEvent: Codable, Equatable {
+    public var data: Data?
+    public var size: TerminalSize?
+    public init(data: Data) { self.data = data }
+    public init(size: TerminalSize) { self.size = size }
+    public var isValid: Bool { (data != nil && size == nil) || (data == nil && size?.isValid == true) }
+}
+
+/// Keep ANSI bytes and geometry changes in their original order, from the initial grid.
+public struct TerminalReplay {
+    private var events: [TerminalEvent] = []
+    private var cost = 0
+    private var overflowed = false
+    public let limit: Int
+    public init(limit: Int = 256 * 1024) { self.limit = limit }
+    public var snapshot: [TerminalEvent]? { overflowed ? nil : events }
+    public mutating func append(_ event: TerminalEvent) {
+        guard !overflowed else { return }
+        cost += (event.data?.count ?? 0) + 64
+        guard event.isValid, cost <= limit else { overflowed = true; events.removeAll(); return }
+        events.append(event)
+    }
+}
 
 @MainActor
-public final class TerminalFeed {
-    private var replay = ReplayBuffer()
-    private var listeners: [UUID: (Data, Bool) -> Void] = [:]
+public final class TerminalFeed: ObservableObject {
+    private var replay = TerminalReplay()
+    private var listeners: [UUID: ([TerminalEvent], Bool) -> Void] = [:]
+    @Published public private(set) var size = TerminalSize.initial
     public var sequence: UInt64 = 0
-    public var snapshot: Data? { replay.snapshot }
+    public var snapshot: [TerminalEvent]? { replay.snapshot }
     public init() {}
-    public func append(_ bytes: Data) {
-        replay.append(bytes)
-        for listener in listeners.values { listener(bytes, false) }
+    public func append(_ bytes: Data) { append(TerminalEvent(data: bytes)) }
+    public func resize(_ size: TerminalSize) { guard size.isValid else { return }; append(TerminalEvent(size: size)) }
+    private func append(_ event: TerminalEvent) {
+        if let size = event.size { self.size = size }
+        replay.append(event)
+        for listener in listeners.values { listener([event], false) }
     }
-    public func reset(_ bytes: Data, sequence: UInt64) {
-        self.sequence = sequence; replay = ReplayBuffer(); replay.append(bytes)
-        for listener in listeners.values { listener(bytes, true) }
+    @discardableResult public func reset(_ events: [TerminalEvent], sequence: UInt64) -> Bool {
+        guard events.allSatisfy(\.isValid) else { return false }
+        var replay = TerminalReplay()
+        for event in events { replay.append(event) }
+        guard replay.snapshot != nil else { return false }
+        self.sequence = sequence; self.replay = replay
+        size = events.compactMap(\.size).last ?? .initial
+        for listener in listeners.values { listener(events, true) }
+        return true
     }
-    public func observe(_ callback: @escaping (Data, Bool) -> Void) -> UUID {
+    public func observe(_ callback: @escaping ([TerminalEvent], Bool) -> Void) -> UUID {
         let id = UUID(); listeners[id] = callback
         if let snapshot { callback(snapshot, true) }
         return id

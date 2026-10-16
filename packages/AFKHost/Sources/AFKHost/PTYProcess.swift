@@ -40,6 +40,11 @@ final class PTYProcess {
         monitor = exitSource; exitSource.activate()
         return true
     }
+    func resize(columns: Int, rows: Int) -> Bool {
+        guard fd >= 0 else { return false }
+        var size = winsize(ws_row: UInt16(rows), ws_col: UInt16(columns), ws_xpixel: 0, ws_ypixel: 0)
+        return ioctl(fd, TIOCSWINSZ, &size) == 0
+    }
     func send(_ data: Data) {
         guard fd >= 0 else { return }
         guard pending.count + data.count <= 64 * 1024 else { terminate(); return }

@@ -30,7 +30,7 @@ The relay SHALL persist host identity, linked devices and revocation in PostgreS
 
 ### Requirement: Explicit replay boundary
 
-The host SHALL replay the full fixed-size terminal stream only while it fits its bounded buffer.
+The host SHALL replay the full ordered terminal output and resize stream only while it fits its bounded buffer.
 
 #### Scenario: Replay overflow
 - **WHEN** a client attaches after the buffer limit was exceeded
@@ -39,3 +39,18 @@ The host SHALL replay the full fixed-size terminal stream only while it fits its
 ### Requirement: Honest POC trust model
 
 The applications and documentation SHALL identify that this version requires a trusted relay and does not implement E2EE.
+
+### Requirement: Controller-sized terminal
+The host SHALL accept geometry changes only from the current lease owner and epoch, using the shared input/resize command sequence. Both clients SHALL render the same authoritative grid. Each client SHALL propose its available viewport when it takes control, without restarting the shell.
+
+#### Scenario: Switch from Mac to iPhone and back
+- WHEN the iPhone takes control
+- THEN the PTY fits the phone viewport and both clients receive the resize before subsequent output
+- WHEN the Mac takes control again
+- THEN the PTY fits the current Mac viewport
+- AND resizing an observing window does not change the shared grid
+
+#### Scenario: Reconnect after resizing
+- WHEN a client attaches after several geometry changes
+- THEN it replays bytes and resize events in their original order from 80×24
+- AND history overflow fails explicitly instead of reconstructing incomplete ANSI state

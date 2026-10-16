@@ -30,6 +30,12 @@ docker compose --env-file .env -f deploy/compose.yaml up -d --wait
 
 Open `apps/apple/AFK.xcodeproj`. Run scheme **AFKMac** on your Mac, then **AFKiOS** on an iPhone simulator. Both default to `http://127.0.0.1:8787`.
 
+When launching a built Mac app from an automation terminal, use `./scripts/dev-mac.sh /path/to/AFK.app`. With no argument it uses `.artifacts/ResizeReview/Build/Products/Debug/AFK.app`. This foreground launcher removes inherited `NO_COLOR`, `FORCE_COLOR`, `CLICOLOR` and `CLICOLOR_FORCE` overrides from development tooling, while preserving the rest of the environment. It refuses to launch while AFK is running; quitting the existing app ends its shell sessions.
+
+AFK sessions advertise `TERM=xterm-256color`, `COLORTERM=truecolor` and `TERM_PROGRAM=AFK`, and discard an inherited `TERM_PROGRAM_VERSION` belonging to another terminal. Normal app launches preserve color preferences, including `NO_COLOR`; shell startup files can also set these explicitly. AFK does not force applications to emit color.
+
+AFK connects to the saved relay when the Mac app opens, unless remote access was explicitly paused. Pausing persists across launches. Development builds signed ad hoc may ask for Keychain authorization again after recompilation; use a consistent Apple signing identity for a stable development identity.
+
 1. On Mac, a local shell opens immediately. Choose **Vincular iPhone**.
 2. On iPhone, choose **Vincular Mac** and enter the Mac code and temporary password.
 3. Open a session. It starts read-only; choose **Tomar control** to type.
@@ -65,10 +71,20 @@ The unsigned commands above are compile checks. To **run** the iPhone simulator 
 ## Current boundaries
 
 - Up to eight sessions and eight connected clients per Mac; iPhone remembers one Mac.
-- Fixed 80×24 terminal. Initial ANSI output is replayed up to 256 KiB; after overflow, attaching fails explicitly while the local process continues.
+- The current controller determines the shared terminal size: Mac window or iPhone viewport (including rotation and keyboard). Observers retain that grid and can scroll when it is larger than their screen. ANSI output and ordered resize events are replayed within a 256 KiB budget; after overflow, attaching fails explicitly while the local process continues.
 - Sessions survive closing the Mac window, **not quitting AFK, reboot or sleep with an active network connection**. There is no separate background helper yet.
 - Manual reconnect. No offline keystroke queue or automatic retries of input.
 - SwiftUI screens implement the functional flows; final visual polish and accessibility/device validation remain.
 - No E2EE, QR pairing, signed installer, App Store release, public relay deployment, accounts, file transfer, audio, screen mirroring, Android, Windows or Linux host.
 
 See [architecture](docs/architecture.md), [protocol](docs/protocol.md), [roadmap](docs/roadmap.md). MIT licensed.
+
+## Languages
+
+The Mac and iPhone apps support English and Spanish. Each app follows the device’s preferred languages (including regional variants such as es-CO and en-GB), with English as the fallback. macOS/iOS per-app language settings are supported; relaunch AFK after changing the language. No in-app language picker is required.
+
+Shared UI, accessibility and error translations live in `packages/AFKCore/Sources/AFKCore/Resources/{en,es}.lproj/Localizable.strings`. Native permission descriptions live in `apps/apple/Resources`. Keep both catalogs’ keys and format arguments in sync; `swift test` verifies them. Session names, shell output, commands and credentials are never translated. Adding another language also requires declaring it in the app’s `CFBundleLocalizations` and the shared language resolver.
+
+## Distribution
+
+GitHub Actions workflows prepare relay images in GHCR, signed/notarized macOS releases, Homebrew tap updates and internal TestFlight uploads. See [publishing and required credentials](docs/publishing.md). These pipelines are prepared locally; no release or public relay has been deployed yet.

@@ -16,6 +16,7 @@ public final class HostSession: ObservableObject, Identifiable {
     public var onState: (() -> Void)?
     private let process = PTYProcess()
     private var localSequence: UInt64 = 0
+    private var localSize = TerminalSize.initial
     private var lastRenewal = ProcessInfo.processInfo.systemUptime
     public var info: SessionInfo { SessionInfo(id: id, name: name, running: running, owner: lease.owner, epoch: lease.epoch) }
 
@@ -28,11 +29,14 @@ public final class HostSession: ObservableObject, Identifiable {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("AFK_") && $0.key != "DATABASE_URL" }
         environment["TERM"] = "xterm-256color"; environment["COLORTERM"] = "truecolor"
+        environment["TERM_PROGRAM"] = "AFK"
+        environment.removeValue(forKey: "TERM_PROGRAM_VERSION")
         if !process.start(shell: shell, environment: environment.map { "\($0.key)=\($0.value)" }) { exited(-1) }
     }
     public func claim(_ client: String) {
         guard running else { return }
         lease.claim(client); localSequence = 0; lastRenewal = ProcessInfo.processInfo.systemUptime; publishControl()
+        if client == "local" { applySize(localSize) }
     }
     public func release(_ client: String) { guard lease.owner == client else { return }; lease.release(client); publishControl() }
     public func renew(_ client: String, epoch: UInt64) {
@@ -45,6 +49,22 @@ public final class HostSession: ObservableObject, Identifiable {
         guard running, bytes.count <= 8192, lease.accept(client: client, epoch: epoch, sequence: sequence) else { return }
         lastRenewal = ProcessInfo.processInfo.systemUptime
         process.send(bytes)
+    }
+    public func localResize(_ size: TerminalSize) {
+        guard size.isValid else { return }
+        localSize = size
+        if lease.owner == "local" { applySize(size) }
+    }
+    public func resize(_ size: TerminalSize, client: String, epoch: UInt64, sequence: UInt64) {
+        guard running, size.isValid, lease.accept(client: client, epoch: epoch, sequence: sequence) else { return }
+        applySize(size)
+    }
+    private func applySize(_ size: TerminalSize) {
+        guard running, size != feed.size, process.resize(columns: size.columns, rows: size.rows) else { return }
+        feed.sequence += 1; feed.resize(size)
+        var message = Message("resized", sessionID: id)
+        message.sequence = feed.sequence; message.columns = size.columns; message.rows = size.rows
+        onEvent?(message)
     }
     public func localInput(_ bytes: Data) {
         localSequence += 1; input(bytes, client: "local", epoch: lease.epoch, sequence: localSequence)

@@ -1,0 +1,49 @@
+name: Publish locally built relay
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing prerelease containing locally built image archives
+        required: true
+        type: string
+permissions:
+  contents: write
+  packages: write
+concurrency:
+  group: afk-local-relay-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Publish existing local builds without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          python3 scripts/release/version.py "$RELEASE_TAG"
+          test "$(gh release view "$RELEASE_TAG" --json isPrerelease --jq .isPrerelease)" = true
+          mkdir images
+          cd images
+          gh release download "$RELEASE_TAG" -p 'relay-linux-*.tar.gz' -p 'relay-SHA256SUMS'
+          sha256sum --check relay-SHA256SUMS
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_REPOSITORY_OWNER" --password-stdin
+          image=ghcr.io/jesuspaz/afk-relay
+          for arch in amd64 arm64; do
+            gzip -dc "relay-linux-$arch.tar.gz" | docker load
+            docker tag "$image:local-20261015" "$image:$RELEASE_TAG-$arch"
+            docker push "$image:$RELEASE_TAG-$arch"
+          done
+          docker manifest create "$image:$RELEASE_TAG" "$image:$RELEASE_TAG-amd64" "$image:$RELEASE_TAG-arm64"
+          docker manifest push "$image:$RELEASE_TAG" | tee manifest-result.txt
+          digest=$(tail -1 manifest-result.txt)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf '%s@%s\n' "$image" "$digest" > relay-image.txt
+          gh release upload "$RELEASE_TAG" relay-image.txt

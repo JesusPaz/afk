@@ -8,7 +8,7 @@ Local real PTY, native Mac/iPhone targets, shared Swift core, Go relay, PostgreS
 
 1. E2EE threat model, reviewed transport design, authenticated device identity and recovery.
 2. Separate Mac background host, restart semantics and signed/notarized installation.
-3. Authoritative terminal-state snapshots, resize policy, reconnection backoff and explicit resynchronization.
+3. Authoritative terminal-state snapshots, reconnection backoff and explicit resynchronization.
 4. QR pairing, full approved visual system, clear disconnected / expired / revoked states, VoiceOver and Dynamic Type validation.
 5. Self-host deployment with HTTPS, migrations/versioning, backups, quotas and operational tests. Default hosted relay requires explicit deployment and operations work.
 6. Real iPhone tests across sleep, backgrounding, mobile networking and physical keyboards; TestFlight distribution.

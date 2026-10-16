@@ -15,7 +15,7 @@ public enum ServerAddress {
         guard let u = URL(string: value), let host = u.host, u.user == nil, u.password == nil,
               u.query == nil, u.fragment == nil, u.path.isEmpty || u.path == "/",
               u.scheme == "https" || (u.scheme == "http" && ["127.0.0.1", "localhost", "::1"].contains(host)) else {
-            throw AFKError.message("Usa HTTPS. HTTP solo se permite en localhost para el POC.")
+            throw AFKError.message(L10n.text("Usa HTTPS. HTTP solo se permite en localhost para el POC."))
         }
         return u
     }
@@ -24,7 +24,7 @@ public enum ServerAddress {
 @MainActor
 public final class RelayClient: ObservableObject {
     @Published public private(set) var connected = false
-    @Published public private(set) var status = "Sin conexión"
+    @Published public private(set) var status = L10n.text("Sin conexión")
     public var onMessage: ((Message) -> Void)?
     public var onDisconnect: (() -> Void)?
     private var socket: URLSessionWebSocketTask?
@@ -42,8 +42,8 @@ public final class RelayClient: ObservableObject {
         if let body { request.httpBody = try JSONEncoder().encode(body) }
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
-            let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"] ?? "No se pudo conectar al servidor."
-            throw AFKError.message(message)
+            let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"] ?? "unknown"
+            throw AFKError.message(L10n.serverError(message))
         }
         return try JSONDecoder().decode(Response.self, from: data)
     }
@@ -51,14 +51,14 @@ public final class RelayClient: ObservableObject {
         var r = URLRequest(url: base.appendingPathComponent("v1/clients/\(clientID)")); r.httpMethod = "DELETE"; r.timeoutInterval = 15
         r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (_, response) = try await session.data(for: r)
-        guard (response as? HTTPURLResponse)?.statusCode == 204 else { throw AFKError.message("No se pudo revocar el acceso.") }
+        guard (response as? HTTPURLResponse)?.statusCode == 204 else { throw AFKError.message(L10n.text("No se pudo revocar el acceso.")) }
     }
     public func connect(_ base: URL, token: String) {
         disconnect(); let current = UUID(); generation = current
         var parts = URLComponents(url: base.appendingPathComponent("v1/connect"), resolvingAgainstBaseURL: false)!
         parts.scheme = base.scheme == "https" ? "wss" : "ws"
         var request = URLRequest(url: parts.url!); request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let socket = session.webSocketTask(with: request); socket.maximumMessageSize = 512 * 1024; self.socket = socket; socket.resume(); status = "Conectando…"
+        let socket = session.webSocketTask(with: request); socket.maximumMessageSize = 512 * 1024; self.socket = socket; socket.resume(); status = L10n.text("Conectando…")
         receiver = Task { [weak self] in
             do {
                 while !Task.isCancelled {
@@ -67,17 +67,17 @@ public final class RelayClient: ObservableObject {
                     let bytes: Data
                     switch received { case .string(let text): bytes = Data(text.utf8); case .data(let data): bytes = data; @unknown default: continue }
                     let message = try JSONDecoder().decode(Message.self, from: bytes)
-                    self.connected = true; self.status = "Conectado"; self.onMessage?(message)
+                    self.connected = true; self.status = L10n.text("Conectado"); self.onMessage?(message)
                 }
             } catch {
                 guard let self, self.generation == current, !Task.isCancelled else { return }
-                self.disconnect(); self.status = "Sin conexión. Reintenta para continuar."
+                self.disconnect(); self.status = L10n.text("Sin conexión. Reintenta para continuar.")
             }
         }
     }
     public func send(_ message: Message) {
         guard socket != nil else { return }
-        guard outgoing.count < 16 else { disconnect(); status = "Conexión lenta. Reconecta para recuperar la sesión."; return }
+        guard outgoing.count < 16 else { disconnect(); status = L10n.text("Conexión lenta. Reconecta para recuperar la sesión."); return }
         outgoing.append(message)
         guard sender == nil else { return }
         let current = generation
@@ -98,6 +98,6 @@ public final class RelayClient: ObservableObject {
     }
     public func disconnect() {
         generation = UUID(); receiver?.cancel(); receiver = nil; sender?.cancel(); sender = nil
-        socket?.cancel(with: .goingAway, reason: nil); socket = nil; outgoing.removeAll(); connected = false; status = "Sin conexión"; onDisconnect?()
+        socket?.cancel(with: .goingAway, reason: nil); socket = nil; outgoing.removeAll(); connected = false; status = L10n.text("Sin conexión"); onDisconnect?()
     }
 }

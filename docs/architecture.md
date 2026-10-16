@@ -12,7 +12,7 @@ The Mac owns shell processes, byte ordering, terminal dimensions, replay buffers
 
 A lease contains owner, epoch and last accepted input sequence. Taking control increments the epoch. The host accepts input only from that owner, matching that epoch, with an increasing sequence. Both local and remote input pass through this check on the main actor. Remote leases expire after 30 seconds without renewal/input; iPhone renews every 10 seconds. Disconnect releases control. Taking control is explicit and preempts the previous writer in this POC.
 
-The process stays on the Mac when the network fails. Client output sequence gaps force a new snapshot. Snapshots replay the complete fixed-size stream from process creation; truncating arbitrary ANSI bytes cannot restore a terminal correctly. At the replay cap we therefore refuse another attach. Production needs authoritative terminal-state snapshots and bounded scrollback.
+The process stays on the Mac when the network fails. Client output sequence gaps force a new snapshot. Snapshots replay the complete stream of ANSI bytes and ordered geometry changes from process creation; truncating arbitrary ANSI bytes cannot restore a terminal correctly. At the replay cap we therefore refuse another attach. Production needs authoritative terminal-state snapshots and bounded scrollback.
 
 ## Storage
 

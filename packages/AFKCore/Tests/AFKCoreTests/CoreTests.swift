@@ -17,9 +17,27 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(lease.owner, "phone"); lease.release("phone"); XCTAssertEqual(lease.owner, "")
     }
     func testOverflowFailsClosedInsteadOfReplayingBrokenANSI() {
-        var buffer = ReplayBuffer(limit: 4); buffer.append(Data([27, 91, 51, 49]))
-        XCTAssertNotNil(buffer.snapshot); buffer.append(Data([109])); XCTAssertNil(buffer.snapshot)
-        XCTAssertTrue(buffer.data.isEmpty)
+        var buffer = TerminalReplay(limit: 68); buffer.append(TerminalEvent(data: Data([27, 91, 51, 49])))
+        XCTAssertNotNil(buffer.snapshot); buffer.append(TerminalEvent(data: Data([109]))); XCTAssertNil(buffer.snapshot)
+    }
+    @MainActor func testReplayPreservesResizeOrderAndRejectsInvalidGeometry() throws {
+        let feed = TerminalFeed()
+        feed.append(Data([27, 91, 51]))
+        feed.resize(TerminalSize(columns: 39, rows: 30))
+        feed.append(Data([49, 109, 65]))
+        feed.resize(TerminalSize(columns: 120, rows: 42))
+        let encoded = try JSONEncoder().encode(feed.snapshot!)
+        let events = try JSONDecoder().decode([TerminalEvent].self, from: encoded)
+        let restored = TerminalFeed()
+        XCTAssertTrue(restored.reset(events, sequence: 4))
+        XCTAssertEqual(restored.snapshot, feed.snapshot)
+        XCTAssertEqual(restored.size, TerminalSize(columns: 120, rows: 42))
+        XCTAssertEqual(restored.sequence, 4)
+        XCTAssertFalse(restored.reset([TerminalEvent(size: TerminalSize(columns: 0, rows: 24))], sequence: 5))
+        XCTAssertEqual(restored.sequence, 4)
+        var replay = TerminalReplay(limit: 128)
+        for _ in 0..<3 { replay.append(TerminalEvent(size: .initial)) }
+        XCTAssertNil(replay.snapshot)
     }
     func testServerDoesNotAllowPlaintextRemoteOrCredentialURLs() {
         XCTAssertThrowsError(try ServerAddress.parse("http://example.com"))

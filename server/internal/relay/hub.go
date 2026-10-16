@@ -16,6 +16,7 @@ type Message struct {
 	SessionID string          `json:"sessionID,omitempty"`
 	Epoch     uint64          `json:"epoch,omitempty"`
 	Sequence  uint64          `json:"sequence,omitempty"`
+	Events    json.RawMessage `json:"events,omitempty"`
 	Data      string          `json:"data,omitempty"`
 	Columns   int             `json:"columns,omitempty"`
 	Rows      int             `json:"rows,omitempty"`
@@ -161,7 +162,7 @@ func (h *Hub) route(p *peer, m Message) {
 		return
 	}
 	switch m.Type {
-	case "sessions", "snapshot", "output", "control", "exit", "error":
+	case "sessions", "snapshot", "output", "resized", "control", "exit", "error":
 	default:
 		p.cancel()
 		return

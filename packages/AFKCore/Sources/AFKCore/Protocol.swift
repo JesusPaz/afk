@@ -18,6 +18,7 @@ public struct Message: Codable {
     public var epoch: UInt64?
     public var sequence: UInt64?
     public var data: String?
+    public var events: [TerminalEvent]?
     public var columns: Int?
     public var rows: Int?
     public var owner: String?
@@ -51,19 +52,4 @@ public struct ControlLease {
         guard !client.isEmpty, client == owner, epoch == self.epoch, sequence > self.sequence else { return false }
         self.sequence = sequence; return true
     }
-}
-
-/// Replay is only valid from the beginning of a fixed-size POC terminal.
-/// Overflow fails explicitly instead of replaying incomplete ANSI state.
-public struct ReplayBuffer {
-    public let limit: Int
-    public private(set) var data = Data()
-    public private(set) var overflowed = false
-    public init(limit: Int = 256 * 1024) { self.limit = limit }
-    public mutating func append(_ bytes: Data) {
-        guard !overflowed else { return }
-        guard data.count + bytes.count <= limit else { overflowed = true; data.removeAll(); return }
-        data.append(bytes)
-    }
-    public var snapshot: Data? { overflowed ? nil : data }
 }

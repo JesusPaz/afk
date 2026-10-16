@@ -9,3 +9,5 @@ Read README.md and docs/security.md before changing transport or terminal code.
 - Test Go with `go test -race ./...` from server; test Swift with `swift test`.
 - Use real PostgreSQL for store integration tests via AFK_TEST_DATABASE_URL.
 - Every PR links a tracking issue. Do not claim production readiness or E2EE while the POC trusts the relay.
+
+- For native UI validation, use Xcode MCP, xcodebuild and simctl. Do not use Computer Use unless Jesus explicitly asks for it.

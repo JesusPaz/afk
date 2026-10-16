@@ -1,0 +1,64 @@
+name: Homebrew update
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing published release to install in the tap'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: afk-homebrew
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    environment: homebrew
+    env:
+      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Validate tap configuration
+        run: |
+          test -n "$GH_TOKEN"
+          [[ "$TAP_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/homebrew-[A-Za-z0-9_.-]+$ ]]
+          python3 scripts/release/version.py "$RELEASE_TAG"
+      - name: Download published cask and open update PR
+        run: |
+          token=afk
+          [[ "$RELEASE_TAG" != *-rc.* ]] || token=afk@preview
+          mkdir -p dist
+          gh release download "$RELEASE_TAG" -R JesusPaz/afk -p "$token.rb" -D dist
+          gh auth setup-git
+          gh repo clone "$TAP_REPOSITORY" "$RUNNER_TEMP/tap" -- --depth 1
+          cp "dist/$token.rb" "$RUNNER_TEMP/$token.rb"
+          cd "$RUNNER_TEMP/tap"
+          branch="afk/$RELEASE_TAG"
+          git switch -c "$branch"
+          mkdir -p Casks
+          cp "$RUNNER_TEMP/$token.rb" "Casks/$token.rb"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "Casks/$token.rb"
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "chore: update $token to $RELEASE_TAG"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            git fetch origin "$branch"
+            git diff --exit-code FETCH_HEAD -- "Casks/$token.rb"
+          else
+            git push origin "$branch"
+          fi
+          if [[ -n "$(gh pr list -R "$TAP_REPOSITORY" --head "$branch" --json number --jq '.[].number')" ]]; then exit 0; fi
+          gh pr create -R "$TAP_REPOSITORY" --head "$branch" \
+            --title "Update $token to $RELEASE_TAG" \
+            --body "Install the signed, notarized AFK release with its SHA-256 checksum. Tracks https://github.com/JesusPaz/afk/issues/3."
