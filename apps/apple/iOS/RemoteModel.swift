@@ -2,8 +2,6 @@ import Foundation
 import Combine
 import AFKCore
 
-struct SavedConnection: Codable { let server: String; let credentials: ClientCredentials }
-
 @MainActor
 final class RemoteModel: ObservableObject {
     let relay = SecurePhoneRelay()
@@ -24,7 +22,6 @@ final class RemoteModel: ObservableObject {
     private var inputSequence: UInt64 = 0
     private var viewport: TerminalSize?
     private var credentials: ClientCredentials?
-    private var server: URL?
     private var subscription: AnyCancellable?
     private var renewal: Timer?
     var canWrite: Bool { ready && owner == credentials?.clientID }
@@ -43,15 +40,15 @@ final class RemoteModel: ObservableObject {
     func restore() {
         do {
             if let saved = try relay.restore() {
-                credentials = saved.credentials; server = try ServerAddress.parse(saved.server); hostName = saved.credentials.host.name; linked = true; reconnect()
+                credentials = saved.credentials; hostName = saved.credentials.host.name; linked = true; reconnect()
             }
         } catch { self.error = error.localizedDescription }
     }
-    func pair(server: String, code: String, secret: String) async {
+    func pair(invitation: String) async {
         do {
             try await unlock.require()
-            let saved = try await relay.pair(invitation: secret)
-            self.server = try ServerAddress.parse(saved.server); credentials = saved.credentials
+            let saved = try await relay.pair(invitation: invitation)
+            credentials = saved.credentials
             hostName = saved.credentials.host.name; linked = true; error = nil
         } catch { self.error = error.localizedDescription }
     }

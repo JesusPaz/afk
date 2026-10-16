@@ -131,7 +131,7 @@ struct PairForm: View {
                     Button {
                         Task {
                             busy = true; model.error = nil
-                            await model.pair(server: "", code: "", secret: invitation)
+                            await model.pair(invitation: invitation)
                             busy = false
                             if model.error == nil { invitation = ""; dismiss() }
                         }
