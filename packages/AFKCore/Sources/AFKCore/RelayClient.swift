@@ -6,7 +6,7 @@ public enum AFKError: LocalizedError {
     public var errorDescription: String? { if case let .message(s) = self { return s }; return nil }
 }
 
-private final class NoRedirects: NSObject, URLSessionTaskDelegate {
+final class NoRedirects: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
 
@@ -21,6 +21,12 @@ public enum ServerAddress {
     }
 }
 
+func secureURLSession() -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.tlsMinimumSupportedProtocolVersion = .TLSv13
+    return URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
+}
+
 @MainActor
 public final class RelayClient: ObservableObject {
     @Published public private(set) var connected = false
@@ -32,7 +38,7 @@ public final class RelayClient: ObservableObject {
     private var sender: Task<Void, Never>?
     private var outgoing: [Message] = []
     private var generation = UUID()
-    private let session = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
+    private let session = secureURLSession()
 
     public init() {}
     public func request<Response: Decodable>(_ base: URL, path: String, method: String = "POST", token: String? = nil, body: [String: String]? = nil) async throws -> Response {
@@ -47,8 +53,8 @@ public final class RelayClient: ObservableObject {
         }
         return try JSONDecoder().decode(Response.self, from: data)
     }
-    public func revoke(_ base: URL, token: String, clientID: String) async throws {
-        var r = URLRequest(url: base.appendingPathComponent("v1/clients/\(clientID)")); r.httpMethod = "DELETE"; r.timeoutInterval = 15
+    public func revoke(_ base: URL, token: String, clientID: String, version: String = "v1") async throws {
+        var r = URLRequest(url: base.appendingPathComponent("\(version)/clients/\(clientID)")); r.httpMethod = "DELETE"; r.timeoutInterval = 15
         r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (_, response) = try await session.data(for: r)
         guard (response as? HTTPURLResponse)?.statusCode == 204 else { throw AFKError.message(L10n.text("No se pudo revocar el acceso.")) }

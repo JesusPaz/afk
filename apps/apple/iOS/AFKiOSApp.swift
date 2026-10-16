@@ -5,12 +5,16 @@ import AFKCore
 struct AFKiOSApp: App {
     @StateObject private var model = RemoteModel()
     @Environment(\.scenePhase) private var phase
+    @State private var needsResume = false
     var body: some Scene {
         WindowGroup {
             PhoneHome(model: model).task { model.restore() }
+                .overlay {
+                    if phase != .active { Color(.systemBackground).ignoresSafeArea().overlay(Image(systemName: "lock.fill").font(.largeTitle)) }
+                }
                 .onChange(of: phase) { _, next in
-                    if next == .background { model.suspend() }
-                    else if next == .active && model.linked { model.reconnect() }
+                    if next == .background { needsResume = true; model.suspend() }
+                    else if next == .active && needsResume { needsResume = false; if model.linked { model.reconnect() } }
                 }
         }
     }
@@ -37,7 +41,7 @@ struct PhoneHome: View {
                             }
                             VStack(alignment: .leading, spacing: 20) {
                                 InstructionRow(number: "1", title: L10n.text("Abre AFK en tu Mac"), detail: L10n.text("Elige «Vincular iPhone»."))
-                                InstructionRow(number: "2", title: L10n.text("Introduce el código"), detail: L10n.text("Usa la contraseña temporal que aparece allí."))
+                                InstructionRow(number: "2", title: L10n.text("Pega la invitación segura"), detail: L10n.text("Copia la invitación que aparece en tu Mac."))
                             }
                             Button { showPair = true } label: {
                                 Text(L10n.text("Vincular mi Mac")).fontWeight(.semibold).frame(maxWidth: .infinity, minHeight: 44)
@@ -109,92 +113,38 @@ struct PhoneHome: View {
 struct PairForm: View {
     @ObservedObject var model: RemoteModel
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("relayURL") private var server = Bundle.main.object(forInfoDictionaryKey: "AFKRelayURL") as? String ?? "http://127.0.0.1:8787"
-    @State private var code = ""
-    @State private var secret = ""
+    @State private var invitation = ""
     @State private var busy = false
-    @State private var reveal = false
-    @State private var configureServer = false
-    @FocusState private var field: Field?
-    private enum Field: Hashable { case code, password, server }
-
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     Label(L10n.text("En tu Mac, abre AFK y pulsa «Vincular iPhone»."), systemImage: "desktopcomputer")
-                        .font(.subheadline).padding(.vertical, 8)
-                    if model.linked {
-                        Text(L10n.text("Este vínculo reemplazará en el iPhone al Mac que tienes guardado."))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                    Text(L10n.text("Copia la invitación segura del Mac y pégala aquí. Incluye la identidad del Mac y el servidor."))
+                    if model.linked { Text(L10n.text("Este vínculo reemplazará en el iPhone al Mac que tienes guardado.")) }
                 }
                 Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(L10n.text("Código del Mac")).font(.subheadline.weight(.medium))
-                        TextField(L10n.text("Ej. ABCD1234"), text: $code)
-                            .font(.title2.monospaced()).textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled().focused($field, equals: .code)
-                            .submitLabel(.next).onSubmit { field = .password }
-                    }.padding(.vertical, 6)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(L10n.text("Contraseña temporal")).font(.subheadline.weight(.medium))
-                        HStack {
-                            Group {
-                                if reveal { TextField(L10n.text("La que muestra tu Mac"), text: $secret) }
-                                else { SecureField(L10n.text("La que muestra tu Mac"), text: $secret) }
-                            }
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .focused($field, equals: .password).submitLabel(.go)
-                            .onSubmit { if !code.isEmpty && !secret.isEmpty && !busy { pair() } }
-                            Button { reveal.toggle() } label: {
-                                Image(systemName: reveal ? "eye.slash" : "eye").frame(width: 44, height: 44)
-                            }.buttonStyle(.borderless)
-                                .accessibilityLabel(reveal ? L10n.text("Ocultar contraseña") : L10n.text("Mostrar contraseña"))
+                    SecureField(L10n.text("Invitación segura"), text: $invitation)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                } footer: { Text(L10n.text("La invitación dura cinco minutos y solo se puede usar una vez.")) }
+                Section {
+                    Button {
+                        Task {
+                            busy = true; model.error = nil
+                            await model.pair(server: "", code: "", secret: invitation)
+                            busy = false
+                            if model.error == nil { invitation = ""; dismiss() }
                         }
-                    }
-                } header: { Text(L10n.text("Datos de vinculación")) }
-                footer: { Text(L10n.text("La contraseña dura cinco minutos y solo se puede usar una vez.")) }
-                Section {
-                    DisclosureGroup(L10n.text("Servidor de conexión"), isExpanded: $configureServer) {
-                        TextField("https://relay.example.com", text: $server)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                            .focused($field, equals: .server).accessibilityLabel(L10n.text("URL del servidor"))
-                        Text(L10n.text("Usa la misma dirección que aparece en tu Mac. Localhost funciona en el simulador, no en un iPhone físico."))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text(server).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                }
-                Section {
-                    Button(action: pair) {
-                        HStack {
-                            Spacer()
-                            if busy { ProgressView().padding(.trailing, 4) }
-                            Text(busy ? L10n.text("Vinculando…") : L10n.text("Vincular Mac")).fontWeight(.semibold)
-                            Spacer()
-                        }.frame(minHeight: 44)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(busy || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || secret.isEmpty)
+                    } label: {
+                        HStack { if busy { ProgressView() }; Text(L10n.text("Vincular Mac")) }
+                    }.disabled(busy || invitation.isEmpty)
                     if let error = model.error { InlineNotice(text: error) }
-                } footer: {
-                    Text(L10n.text("Versión de pruebas. El servidor puede leer la terminal: usa uno de confianza."))
-                }
+                } footer: { Text(L10n.text("El Mac verifica tu dispositivo. La terminal viaja cifrada de extremo a extremo.")) }
             }
-            .scrollDismissesKeyboard(.interactively)
-            .navigationTitle(L10n.text("Vincular Mac")).navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(L10n.text("Vincular Mac"))
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.text("Cancelar")) { dismiss() } } }
             .onAppear { model.error = nil }
             .interactiveDismissDisabled(busy)
-        }
-    }
-    private func pair() {
-        field = nil
-        Task {
-            busy = true; model.error = nil
-            await model.pair(server: server.trimmingCharacters(in: .whitespacesAndNewlines), code: code.trimmingCharacters(in: .whitespacesAndNewlines), secret: secret.trimmingCharacters(in: .whitespacesAndNewlines))
-            busy = false
-            if model.error == nil { dismiss() }
         }
     }
 }

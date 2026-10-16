@@ -158,3 +158,21 @@
 "server.revocation unavailable" = "Could not revoke access. Try again.";
 "server.native clients only" = "Connect using the AFK app.";
 "server.too many requests" = "Too many attempts. Wait a moment and try again.";
+
+// Secure device pairing
+"Mostrar la invitación segura para vincular un iPhone" = "Show the secure invitation to pair an iPhone";
+"Pega la invitación segura" = "Paste the secure invitation";
+"Copia la invitación que aparece en tu Mac." = "Copy the invitation shown on your Mac.";
+"Copia la invitación segura del Mac y pégala aquí. Incluye la identidad del Mac y el servidor." = "Copy the secure invitation from your Mac and paste it here. It includes the Mac identity and server.";
+"Invitación segura" = "Secure invitation";
+"La invitación dura cinco minutos y solo se puede usar una vez." = "The invitation expires in five minutes and can only be used once.";
+"El Mac verifica tu dispositivo. La terminal viaja cifrada de extremo a extremo." = "Your Mac verifies your device. Terminal traffic is end-to-end encrypted.";
+"Copia la invitación segura y pégala en el iPhone." = "Copy the secure invitation and paste it on your iPhone.";
+"Comparte esta invitación" = "Share this invitation";
+"Preparando invitación segura…" = "Preparing secure invitation…";
+"Invitación vencida" = "Invitation expired";
+"La invitación incluye este servidor. Para un iPhone físico necesitas HTTPS accesible." = "The invitation includes this server. A physical iPhone needs a reachable HTTPS endpoint.";
+"Se desconectará. Para volver a entrar necesitará una nueva invitación segura." = "It will disconnect. A new secure invitation is required to pair again.";
+"Vincúlalo con una invitación segura para ver y controlar las sesiones de este Mac." = "Pair with a secure invitation to view and control this Mac’s sessions.";
+"La terminal viaja cifrada de extremo a extremo. Las sesiones se ejecutan en tu Mac y terminan al salir de AFK." = "Terminal traffic is end-to-end encrypted. Sessions run on your Mac and end when AFK quits.";
+"Confirma tu identidad para autorizar el acceso a la terminal del Mac." = "Confirm your identity to authorize access to your Mac terminal.";

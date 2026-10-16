@@ -11,7 +11,7 @@ public struct HostSecret: Codable {
 
 @MainActor
 public final class HostController: ObservableObject {
-    public let relay = RelayClient()
+    public let relay = SecureHostRelay()
     @Published public private(set) var sessions: [HostSession] = []
     @Published public private(set) var host: HostIdentity?
     @Published public private(set) var pairing: Pairing?
@@ -64,25 +64,33 @@ public final class HostController: ObservableObject {
             let saved: HostSecret? = try credentials ?? SecretStore.read("host:\(url.absoluteString)")
             let identity = try saved ?? HostSecret(token: SecretStore.randomToken())
             if credentials == nil && saved == nil { try SecretStore.write(identity, account: "host:\(url.absoluteString)") }
-            let h: HostIdentity = try await relay.request(url, path: "v1/hosts", body: ["id": identity.id, "token": identity.token, "name": Host.current().localizedName ?? "Mac"])
+            let h = try await relay.connect(url, id: identity.id, token: identity.token, name: Host.current().localizedName ?? "Mac")
             remoteAccessPaused = false; preferences.set(false, forKey: "remoteAccessPaused")
-            base = url; secret = identity; host = h; relay.connect(url, token: identity.token); error = nil
+            base = url; secret = identity; host = h; error = nil
         } catch { self.error = error.localizedDescription }
     }
     public func makePairing() async {
-        guard let base, let secret else { error = L10n.text("Conecta el Mac al relay primero."); return }
-        do { pairing = try await relay.request(base, path: "v1/pairing", token: secret.token) }
+        guard base != nil, secret != nil else { error = L10n.text("Conecta el Mac al relay primero."); return }
+        do { pairing = try relay.invitation() }
         catch { self.error = error.localizedDescription }
     }
-    public func refreshClients() async {
-        guard let base, let secret else { return }
-        do { clients = try await relay.request(base, path: "v1/clients", method: "GET", token: secret.token) }
-        catch { self.error = error.localizedDescription }
+    public func refreshClients(server: String? = nil) async {
+        do {
+            if let server, !relay.connected {
+                let url = try ServerAddress.parse(server)
+                if let identity: HostSecret = try SecretStore.read("host:\(url.absoluteString)") {
+                    try relay.restoreTrust(url, id: identity.id, token: identity.token)
+                }
+            }
+            clients = relay.clients
+        } catch { self.error = error.localizedDescription }
     }
     public func revoke(_ id: String) async {
-        guard let base, let secret else { return }
-        do { try await relay.revoke(base, token: secret.token, clientID: id); await refreshClients() }
-        catch { self.error = error.localizedDescription }
+        do { try await relay.revoke(id); await refreshClients() }
+        catch {
+            clients = relay.clients; self.error = error.localizedDescription
+            if !relay.connected { remoteAccessPaused = true; preferences.set(true, forKey: "remoteAccessPaused") }
+        }
     }
     public func pause() {
         remoteAccessPaused = true; preferences.set(true, forKey: "remoteAccessPaused")

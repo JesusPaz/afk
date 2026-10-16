@@ -6,5 +6,6 @@
 <key>CFBundleDevelopmentRegion</key><string>en</string>
 <key>CFBundleLocalizations</key><array><string>en</string><string>es</string></array>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+<key>NSFaceIDUsageDescription</key><string>AFK verifies your identity before allowing access to your Mac terminal.</string>
 <key>NSLocalNetworkUsageDescription</key><string>AFK connects to the relay you chose to share your Mac terminal.</string>
 </dict></plist>

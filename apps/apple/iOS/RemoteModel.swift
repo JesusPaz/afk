@@ -6,7 +6,9 @@ struct SavedConnection: Codable { let server: String; let credentials: ClientCre
 
 @MainActor
 final class RemoteModel: ObservableObject {
-    let relay = RelayClient()
+    let relay = SecurePhoneRelay()
+    private let unlock = LocalDeviceUnlock()
+    private var reconnecting = false
     let feed = TerminalFeed()
     @Published var sessions: [SessionInfo] = []
     @Published var selected: String?
@@ -40,20 +42,28 @@ final class RemoteModel: ObservableObject {
     }
     func restore() {
         do {
-            if let saved: SavedConnection = try SecretStore.read("last-client") {
+            if let saved = try relay.restore() {
                 credentials = saved.credentials; server = try ServerAddress.parse(saved.server); hostName = saved.credentials.host.name; linked = true; reconnect()
             }
         } catch { self.error = error.localizedDescription }
     }
     func pair(server: String, code: String, secret: String) async {
         do {
-            let url = try ServerAddress.parse(server)
-            let c: ClientCredentials = try await relay.request(url, path: "v1/pair", body: ["code": code, "secret": secret, "name": "iPhone"])
-            try SecretStore.write(SavedConnection(server: url.absoluteString, credentials: c), account: "last-client")
-            self.server = url; credentials = c; hostName = c.host.name; linked = true; error = nil; reconnect()
+            try await unlock.require()
+            let saved = try await relay.pair(invitation: secret)
+            self.server = try ServerAddress.parse(saved.server); credentials = saved.credentials
+            hostName = saved.credentials.host.name; linked = true; error = nil
         } catch { self.error = error.localizedDescription }
     }
-    func reconnect() { guard let server, let credentials else { return }; ready = false; relay.connect(server, token: credentials.token) }
+    func reconnect() {
+        guard !unlock.isBusy, !reconnecting else { return }
+        ready = false; reconnecting = true
+        Task {
+            defer { reconnecting = false }
+            do { try await unlock.require(); relay.connect() }
+            catch { relay.disconnect(); self.error = error.localizedDescription }
+        }
+    }
     func attach(_ id: String) {
         if selected != id { release(); epoch = 0; inputSequence = 0 }
         selected = id; ready = false; sessionNotice = nil; relay.send(Message("attach", sessionID: id))
@@ -61,7 +71,7 @@ final class RemoteModel: ObservableObject {
     func claim() { guard ready else { return }; relay.send(Message("claim", sessionID: selected)) }
     func release() { if canWrite { relay.send(Message("release", sessionID: selected)) }; owner = "" }
     func leave() { release(); selected = nil; ready = false }
-    func suspend() { release(); relay.disconnect(); ready = false }
+    func suspend() { unlock.invalidate(); release(); relay.disconnect(); ready = false; sessions = []; _ = feed.reset([], sequence: 0) }
     func resize(_ size: TerminalSize) {
         viewport = size
         sendSize()

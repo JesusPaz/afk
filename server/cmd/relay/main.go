@@ -42,6 +42,7 @@ func run() error {
 	}
 	app := relay.New(&store.Store{DB: db})
 	defer app.Hub.Close()
+	defer app.Tunnels.Close()
 	addr := os.Getenv("AFK_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:8787"
@@ -49,7 +50,7 @@ func run() error {
 	srv := &http.Server{Addr: addr, Handler: app.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8192}
 	done := make(chan error, 1)
 	go func() { done <- srv.ListenAndServe() }()
-	slog.Info("AFK development relay ready", "address", addr, "protocol", 1)
+	slog.Info("AFK development relay ready", "address", addr, "protocol", 2)
 	select {
 	case err := <-done:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -58,6 +59,7 @@ func run() error {
 		return err
 	case <-ctx.Done():
 		app.Hub.Close()
+		app.Tunnels.Close()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return srv.Shutdown(shutdown)
