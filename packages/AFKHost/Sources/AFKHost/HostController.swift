@@ -25,23 +25,28 @@ public final class HostController: ObservableObject {
     @Published public private(set) var connectedClients: Set<String> = []
     private let history: AccessHistory
     public var accessEvents: [AccessEvent] { history.events }
+    private let historyDirectory: URL?
     private let preferences: UserDefaults
     private var restoredConnection = false
     private var base: URL?
     private var secret: HostSecret?
     private var timer: Timer?
     private let pairingUnlock = LocalDeviceUnlock()
+    private let trustUnlock = LocalDeviceUnlock()
     private var pairingGeneration = UUID()
     private var lockObserver: NSObjectProtocol?
     private var statusSubscription: AnyCancellable?
 
-    public init(preferences: UserDefaults = .standard, access: RemoteAccess? = nil) {
+    public init(preferences: UserDefaults = .standard, access: RemoteAccess? = nil, historyDirectory: URL? = nil) {
+        self.historyDirectory = historyDirectory
         self.preferences = preferences
         self.access = access ?? RemoteAccess(); history = AccessHistory(preferences: preferences)
         remoteAccessPaused = preferences.bool(forKey: "remoteAccessPaused")
         relay.onPairingEnded = { [weak self] in self?.pairing = nil }
         lockObserver = DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.cancelPairing() }
+            Task { @MainActor in
+                self?.cancelPairing(); self?.trustUnlock.invalidate(); self?.accessRevision += 1
+            }
         }
         relay.onMessage = { [weak self] in self?.receive($0) }
         relay.onDisconnect = { [weak self] in
@@ -58,7 +63,10 @@ public final class HostController: ObservableObject {
     public func create(name: String = "Shell", id: String = UUID().uuidString) -> HostSession? {
         if let existing = sessions.first(where: { $0.id == id }) { return existing }
         guard sessions.count < 8 else { error = L10n.text("El POC permite hasta ocho sesiones."); return nil }
-        let session = HostSession(id: id, name: String(name.prefix(60)))
+        let recording: TerminalHistory?
+        do { recording = try historyDirectory.map { try TerminalHistory(root: $0, name: String(name.prefix(60))) } }
+        catch { self.error = error.localizedDescription; return nil }
+        let session = HostSession(id: id, name: String(name.prefix(60)), history: recording)
         session.onEvent = { [weak self] in self?.forward($0) }
         session.onState = { [weak self] in self?.publishSessions() }
         sessions.append(session); session.start(); publishSessions(); return session
@@ -81,7 +89,7 @@ public final class HostController: ObservableObject {
             if base != nil && (base != url || secret?.id != identity.id) { stopRemoteAccess() }
             let h = try await relay.connect(url, id: identity.id, token: identity.token, name: Host.current().localizedName ?? "Mac")
             remoteAccessPaused = false; preferences.set(false, forKey: "remoteAccessPaused")
-            base = url; secret = identity; host = h; error = nil
+            base = url; secret = identity; host = h; error = nil; restoreTrustedAccess()
         } catch { self.error = error.localizedDescription }
     }
     public func cancelPairing() {
@@ -104,7 +112,7 @@ public final class HostController: ObservableObject {
         do {
             try await pairingUnlock.require()
             try relay.approvePairing(id)
-            clients = relay.clients
+            clients = relay.clients; restoreTrustedAccess()
         } catch { self.error = error.localizedDescription }
     }
     public func makePairing() async {
@@ -120,7 +128,7 @@ public final class HostController: ObservableObject {
                     try relay.restoreTrust(url, id: identity.id, token: identity.token)
                 }
             }
-            clients = relay.clients
+            clients = relay.clients; restoreTrustedAccess()
         } catch { self.error = error.localizedDescription }
     }
     public func revoke(_ id: String) async {
@@ -133,19 +141,53 @@ public final class HostController: ObservableObject {
         }
     }
     public func pause() {
+        trustUnlock.invalidate()
         cancelPairing()
         accessRevision += 1
         remoteAccessPaused = true; preferences.set(true, forKey: "remoteAccessPaused")
         access.removeAll(); relay.disconnect(); pairing = nil
+        do { try relay.clearFullAccess() } catch { self.error = error.localizedDescription }
         do { try relay.cancelInvitation() } catch { self.error = error.localizedDescription }
         record(.stopped)
     }
-    public func shutdown() { relay.disconnect(); sessions.forEach { $0.terminate() }; timer?.invalidate() }
+    public func shutdown() { trustUnlock.invalidate(); accessRevision += 1; relay.disconnect(); sessions.forEach { $0.terminate() }; timer?.invalidate() }
     public func stopRemoteAccess() { pause() }
     public func revokeAllDevices() {
         pause()
         do { try relay.revokeAll(); clients = relay.clients; record(.revoked) }
         catch { self.error = error.localizedDescription }
+    }
+    public var hardwareIdentity: Bool { relay.trust?.state.identity.isHardwareBacked == true }
+    public func supportsTrustedAccess(_ client: String) -> Bool {
+        hardwareIdentity && relay.trust?.state.peers.first(where: { $0.id == client })?.biometricIdentity == true
+    }
+    private func restoreTrustedAccess() {
+        let peers = relay.trust?.state.peers ?? []
+        access.setTrustedClients(Set(peers.filter { $0.fullAccess == true && $0.biometricIdentity == true && hardwareIdentity }.map(\.id)))
+    }
+    public func setTrustedAccess(_ client: String, enabled: Bool) async {
+        let revision = accessRevision
+        do {
+            if enabled { try await trustUnlock.require() }
+            guard accessRevision == revision else { return }
+            try relay.setFullAccess(client, enabled: enabled)
+            accessRevision += 1
+            access.remove(client: client)
+            if !enabled { releaseControl(client) }
+            restoreTrustedAccess()
+            record(enabled ? .shared : .permissionsRemoved, client: client); publishSessions()
+        } catch { self.error = error.localizedDescription }
+    }
+    public func upgradeIdentity(server: String) async {
+        let revision = accessRevision
+        do {
+            try await trustUnlock.require()
+            guard accessRevision == revision else { return }
+            accessRevision += 1; access.removeAll()
+            try relay.upgradeIdentity()
+            clients = relay.clients
+            await connect(server: server)
+        } catch { self.error = error.localizedDescription }
     }
     public func setAccess(client: String, session: String, level: SessionAccess, duration: TimeInterval = 3600, allowClose: Bool = false) {
         guard relay.clients.contains(where: { $0.id == client }), sessions.contains(where: { $0.id == session }) else { return }

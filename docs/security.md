@@ -11,14 +11,26 @@ or universally more secure than another product.
   Missing/changed identities fail closed. The relay cannot grant shell access.
 - Local 256-bit, five-minute, single-use invitation; five persisted attempts.
   Authorization and invitation consumption commit atomically before acknowledgement.
-- Device-only Keychain identity persistence. Device-owner authentication gates
-  invitation creation and candidate approval on Mac, and pairing/reconnection in the iPhone UI.
+- New native identities use Secure Enclave P-256 keys, stored as device-bound opaque
+  blobs in Keychain. TLS CertificateVerify signs inside hardware through the supported
+  NIOSSL custom-key API. No plaintext private key is exported for these identities.
+- New iPhone identities require the current Face ID/Touch ID enrollment to use the key,
+  with no device-passcode fallback for signing. Every new TLS connection gets a fresh
+  authentication context. Changing biometrics invalidates the key; deliberately re-pair.
+  Mac identity signing works unattended after first unlock; granting permissions and
+  replacing the Mac identity require local device-owner authentication.
 - Local revocation precedes network revocation. Persistence failures disconnect.
   No automatic replacement of an identity, legacy fallback or uncertain input replay.
 - The host validates the authorized certificate on every application packet, then
   enforces explicit per-device/session permissions before exclusive input ownership,
   epoch and sequence checks. Pairing grants no session visibility or shell access.
-- New sessions are private. Read, temporary control, timed creation and timed closing
+- New sessions are private except to explicitly authorized trusted devices. Trusted
+  access includes all existing/future sessions and creation/closing, persists in the
+  Mac identity trust record, and is bound to the exact paired certificate. It is never
+  granted merely by pairing. The UI requires confirmation and Mac authentication.
+  Removing trust disconnects that phone; stopping all remote access clears trusted
+  grants. Other devices keep the existing per-session permission model.
+- Read, temporary control, timed creation and timed closing
   permissions are distinct. Both session lists and every output/control event are
   filtered locally. An authorized creator receives control only of its new session,
   until the original creation deadline, with no permission to close it.
@@ -45,11 +57,25 @@ or universally more secure than another product.
 
 ## Remaining boundaries
 
-A compromised operating system, injected process or stolen private device key is
-outside this protection. Device keys are exportable to the TLS process, not Secure
-Enclave-backed. Keychain accessibility and local UI authentication are not a claim
-of hardware-backed non-exportability. Biometrics must be verified on physical
-hardware; a person who knows the device passcode can pass device-owner authentication.
+A compromised operating system or injected process is outside this protection.
+Secure Enclave protects key extraction; it does not prove that every operation was
+requested by the intended person or that the app/OS is uncompromised. Hardware
+biometric signing still needs acceptance testing on a physical iPhone.
+
+Legacy identities remain exportable software keys for compatibility and retain only
+explicit session grants. They are never upgraded silently. The Mac's “Protect Mac
+identity” action removes old pairings and creates a hardware key after local approval;
+new iPhone enrollment creates a biometric key. Unsupported hardware fails closed for
+new identities; there is no production software fallback. Mac authentication can use
+Touch ID or the account password; the Mac mini has no built-in biometric sensor.
+
+The peer's biometric-key capability is an assertion by the locally approved app,
+recorded during pairing and authenticated by its pinned TLS certificate. It is **not
+Apple remote attestation** of the Secure Enclave or app integrity. App Attest is not
+implemented. Do not present a capability flag, certificate or matching PIN as hardware
+attestation. The trust ceremony assumes the user is pairing the genuine app on their
+own devices. An attacker-controlled app approved by the user can misrepresent its
+capabilities. TLS still requires possession of the exact approved key on every connection.
 
 Only share invitations through a channel you trust. A stolen unused invitation
 allows an enrollment attempt during its short lifetime; local authenticated Mac
@@ -66,7 +92,11 @@ only gates AFK's close action: a controller can still run `exit` or kill process
 Read-only access can expose secrets printed by that session. The phone does not
 expose a remote shell. No VM or sandbox is introduced by these controls.
 Apple, SwiftTerm, NIO/BoringSSL and shell programs remain part of the trusted base.
-Terminal replay is in RAM; OS crash reports, swap and shell history are separate.
+Network replay is bounded in RAM. The Mac app also persists complete terminal output
+and geometry in owner-only local session recordings until the user explicitly deletes
+them. This intentionally includes any secrets printed by a shell; AFK does not apply
+additional at-rest encryption. Recordings are never uploaded to the relay and playback
+cannot send input to a shell. OS crash reports, swap, backups and shell history are separate.
 No secure memory-erasure guarantee is made.
 
 Identity certificates expire after five years and fail closed. Automatic key

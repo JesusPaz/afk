@@ -67,8 +67,9 @@ struct TerminalCanvas: View {
     let editable: Bool
     let input: (Data) -> Void
     let resize: (TerminalSize) -> Void
+    var active = true
     var body: some View {
-        TerminalSurface(feed: feed, editable: editable, input: input, resize: resize)
+        TerminalSurface(feed: feed, editable: editable, input: input, resize: resize, active: active)
             .padding(8)
             .background(AFKStyle.terminalBackground)
     }

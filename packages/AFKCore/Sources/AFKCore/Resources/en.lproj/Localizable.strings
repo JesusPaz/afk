@@ -272,3 +272,42 @@
 "El Mac no confirmó la entrada. Revisa la terminal antes de continuar." = "The Mac did not confirm input. Check the terminal before continuing.";
 "Actualiza AFK en el Mac para escribir con confirmación de entrega." = "Update AFK on your Mac to type with delivery confirmation.";
 "Hay entrada sin confirmar. Revisa la terminal antes de volver a escribir." = "Some input is unconfirmed. Check the terminal before typing again.";
+"Permisos de la sesión" = "Session permissions";
+"Permisos de la sesión…" = "Session permissions…";
+"Elige qué dispositivos pueden ver o controlar esta sesión." = "Choose which devices can view or control this session.";
+"Vincula un iPhone para compartir esta sesión." = "Pair an iPhone to share this session.";
+"Este dispositivo necesita Secure Enclave para crear una identidad protegida." = "This device requires Secure Enclave to create a protected identity.";
+"Activa Face ID o Touch ID para entrar. Si cambias la biometría, vuelve a vincular el dispositivo." = "Enable Face ID or Touch ID to connect. If your biometrics change, pair the device again.";
+"¿Proteger la identidad de este Mac?" = "Protect this Mac’s identity?";
+"Proteger y volver a vincular" = "Protect and pair again";
+"Se retirarán los vínculos anteriores. Vuelve a vincular tus iPhones con un QR nuevo. Las terminales locales seguirán abiertas." = "Previous pairings will be removed. Pair your iPhones again with a new QR code. Local terminals will remain open.";
+"Identidad del Mac protegida por Secure Enclave" = "Mac identity protected by Secure Enclave";
+"Protege la identidad del Mac antes de autorizar dispositivos de confianza." = "Protect your Mac’s identity before authorizing trusted devices.";
+"Proteger identidad del Mac…" = "Protect Mac identity…";
+"Las sesiones nuevas son privadas salvo para dispositivos de confianza. Sus permisos persisten hasta retirarlos o cortar todo acceso remoto." = "New sessions are private except for trusted devices. Their permissions persist until removed or all remote access is stopped.";
+"Dispositivo de confianza · acceso completo" = "Trusted device · full access";
+"Puede leer, controlar, crear y cerrar todas las sesiones, incluidas las nuevas. Requiere Face ID o Touch ID al conectar." = "Can view, control, create, and close all sessions, including new ones. Requires Face ID or Touch ID when connecting.";
+"Retirar confianza" = "Remove trust";
+"Confiar en este dispositivo…" = "Trust this device…";
+"Para dar acceso completo, protege la identidad del Mac y vuelve a vincular el iPhone con la app actualizada y Face ID activado." = "For full access, protect your Mac’s identity and pair your iPhone again with the updated app and Face ID enabled.";
+"¿Dar acceso completo a este dispositivo?" = "Give this device full access?";
+"Confiar y dar acceso completo" = "Trust and give full access";
+"Podrá leer, controlar, crear y cerrar todas las sesiones, también las futuras y después de reiniciar AFK. Esto permite ejecutar comandos con tu usuario del Mac. Puedes retirar la confianza en cualquier momento." = "It can view, control, create, and close all sessions, including future ones and after restarting AFK. This allows running commands as your Mac user. You can remove trust at any time.";
+
+"Historial guardado" = "Saved history";
+
+"No se está guardando el historial" = "History is not being saved";
+
+"Grabación local · no ejecuta comandos" = "Local recording · does not run commands";
+
+"Eliminar historial…" = "Delete history…";
+
+"Selecciona una sesión guardada" = "Select a saved session";
+
+"¿Eliminar este historial definitivamente?" = "Permanently delete this history?";
+
+"Eliminar" = "Delete";
+
+"Posición en el historial" = "History position";
+
+"Usa la barra para recorrer toda la grabación; desplázate en la terminal para ver las líneas cercanas." = "Use the slider to browse the full recording; scroll the terminal to see nearby lines.";

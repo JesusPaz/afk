@@ -272,3 +272,42 @@
 "El Mac no confirmó la entrada. Revisa la terminal antes de continuar." = "El Mac no confirmó la entrada. Revisa la terminal antes de continuar.";
 "Actualiza AFK en el Mac para escribir con confirmación de entrega." = "Actualiza AFK en el Mac para escribir con confirmación de entrega.";
 "Hay entrada sin confirmar. Revisa la terminal antes de volver a escribir." = "Hay entrada sin confirmar. Revisa la terminal antes de volver a escribir.";
+"Permisos de la sesión" = "Permisos de la sesión";
+"Permisos de la sesión…" = "Permisos de la sesión…";
+"Elige qué dispositivos pueden ver o controlar esta sesión." = "Elige qué dispositivos pueden ver o controlar esta sesión.";
+"Vincula un iPhone para compartir esta sesión." = "Vincula un iPhone para compartir esta sesión.";
+"Este dispositivo necesita Secure Enclave para crear una identidad protegida." = "Este dispositivo necesita Secure Enclave para crear una identidad protegida.";
+"Activa Face ID o Touch ID para entrar. Si cambias la biometría, vuelve a vincular el dispositivo." = "Activa Face ID o Touch ID para entrar. Si cambias la biometría, vuelve a vincular el dispositivo.";
+"¿Proteger la identidad de este Mac?" = "¿Proteger la identidad de este Mac?";
+"Proteger y volver a vincular" = "Proteger y volver a vincular";
+"Se retirarán los vínculos anteriores. Vuelve a vincular tus iPhones con un QR nuevo. Las terminales locales seguirán abiertas." = "Se retirarán los vínculos anteriores. Vuelve a vincular tus iPhones con un QR nuevo. Las terminales locales seguirán abiertas.";
+"Identidad del Mac protegida por Secure Enclave" = "Identidad del Mac protegida por Secure Enclave";
+"Protege la identidad del Mac antes de autorizar dispositivos de confianza." = "Protege la identidad del Mac antes de autorizar dispositivos de confianza.";
+"Proteger identidad del Mac…" = "Proteger identidad del Mac…";
+"Las sesiones nuevas son privadas salvo para dispositivos de confianza. Sus permisos persisten hasta retirarlos o cortar todo acceso remoto." = "Las sesiones nuevas son privadas salvo para dispositivos de confianza. Sus permisos persisten hasta retirarlos o cortar todo acceso remoto.";
+"Dispositivo de confianza · acceso completo" = "Dispositivo de confianza · acceso completo";
+"Puede leer, controlar, crear y cerrar todas las sesiones, incluidas las nuevas. Requiere Face ID o Touch ID al conectar." = "Puede leer, controlar, crear y cerrar todas las sesiones, incluidas las nuevas. Requiere Face ID o Touch ID al conectar.";
+"Retirar confianza" = "Retirar confianza";
+"Confiar en este dispositivo…" = "Confiar en este dispositivo…";
+"Para dar acceso completo, protege la identidad del Mac y vuelve a vincular el iPhone con la app actualizada y Face ID activado." = "Para dar acceso completo, protege la identidad del Mac y vuelve a vincular el iPhone con la app actualizada y Face ID activado.";
+"¿Dar acceso completo a este dispositivo?" = "¿Dar acceso completo a este dispositivo?";
+"Confiar y dar acceso completo" = "Confiar y dar acceso completo";
+"Podrá leer, controlar, crear y cerrar todas las sesiones, también las futuras y después de reiniciar AFK. Esto permite ejecutar comandos con tu usuario del Mac. Puedes retirar la confianza en cualquier momento." = "Podrá leer, controlar, crear y cerrar todas las sesiones, también las futuras y después de reiniciar AFK. Esto permite ejecutar comandos con tu usuario del Mac. Puedes retirar la confianza en cualquier momento.";
+
+"Historial guardado" = "Historial guardado";
+
+"No se está guardando el historial" = "No se está guardando el historial";
+
+"Grabación local · no ejecuta comandos" = "Grabación local · no ejecuta comandos";
+
+"Eliminar historial…" = "Eliminar historial…";
+
+"Selecciona una sesión guardada" = "Selecciona una sesión guardada";
+
+"¿Eliminar este historial definitivamente?" = "¿Eliminar este historial definitivamente?";
+
+"Eliminar" = "Eliminar";
+
+"Posición en el historial" = "Posición en el historial";
+
+"Usa la barra para recorrer toda la grabación; desplázate en la terminal para ver las líneas cercanas." = "Usa la barra para recorrer toda la grabación; desplázate en la terminal para ver las líneas cercanas.";

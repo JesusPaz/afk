@@ -5,6 +5,7 @@ import NIOHTTP1
 import NIOWebSocket
 import NIOSSL
 import NIOTLS
+import LocalAuthentication
 
 struct SecurePacket: Codable {
     var type: String
@@ -20,6 +21,7 @@ struct SecurePacket: Codable {
     var secret: String?
     var name: String?
     var fingerprint: String?
+    var biometricIdentity: Bool?
     var message: Message?
 }
 
@@ -90,7 +92,7 @@ private final class SecureRecords: ChannelInboundHandler, @unchecked Sendable {
         self.onReady = onReady; self.onPacket = onPacket; self.onClose = onClose
     }
     func handlerAdded(context: ChannelHandlerContext) {
-        timeout = context.eventLoop.scheduleTask(in: .seconds(15)) { context.close(promise: nil) }
+        timeout = context.eventLoop.scheduleTask(in: .seconds(60)) { context.close(promise: nil) }
     }
     func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
         if case .handshakeCompleted(let protocolName) = event as? TLSUserEvent {
@@ -124,6 +126,7 @@ private final class SecureRecords: ChannelInboundHandler, @unchecked Sendable {
 
 @MainActor final class SecureTransport {
     private var channel: Channel?
+    private var authenticationContext: LAContext?
     private var generation = UUID()
     private var readyPeer: Data?
     private var authenticated = false
@@ -132,10 +135,11 @@ private final class SecureRecords: ChannelInboundHandler, @unchecked Sendable {
     var onReady: ((Data) -> Void)?
     var onPacket: ((SecurePacket) -> Void)?
     var onClose: (() -> Void)?
-    func connect(base: URL, path: String, token: String, identity: DeviceIdentity, server: Bool,
+    func connect(base: URL, path: String, token: String, identity: DeviceIdentity, server: Bool, authenticationContext: LAContext? = nil,
                  accepts: @escaping (Data) -> Bool) async throws {
         close(); let current = UUID(); generation = current
-        let tlsContext = try NIOSSLContext(configuration: identity.tlsConfiguration(server: server))
+        let context = authenticationContext ?? LAContext(); self.authenticationContext = context
+        let tlsContext = try NIOSSLContext(configuration: identity.tlsConfiguration(server: server, authenticationContext: context))
         let bridge = WebSocketBytes()
         let records = SecureRecords(onReady: { [weak self] peer in
             DispatchQueue.main.async { MainActor.assumeIsolated { guard let self, self.generation == current else { return }; self.readyPeer = peer; self.deliverReady() } }
@@ -186,7 +190,7 @@ private final class SecureRecords: ChannelInboundHandler, @unchecked Sendable {
                     // The relay may send the first TLS frame in the same read as HTTP 101.
                     pipeline.leftOverBytesStrategy = .forwardBytes
                     let result = try channel.pipeline.syncOperations.configureUpgradableHTTPClientPipeline(configuration: pipeline)
-                    let timeout = channel.eventLoop.scheduleTask(in: .seconds(15)) { channel.close(promise: nil) }
+                    let timeout = channel.eventLoop.scheduleTask(in: .seconds(60)) { channel.close(promise: nil) }
                     result.whenComplete { _ in timeout.cancel() }
                     return result
                 }
@@ -215,5 +219,5 @@ private final class SecureRecords: ChannelInboundHandler, @unchecked Sendable {
             }
         } catch { close(); onClose?() }
     }
-    func close() { generation = UUID(); channel?.close(promise: nil); channel = nil; readyPeer = nil; authenticated = false; pendingBytes = 0; pendingCount = 0 }
+    func close() { authenticationContext?.invalidate(); authenticationContext = nil; generation = UUID(); channel?.close(promise: nil); channel = nil; readyPeer = nil; authenticated = false; pendingBytes = 0; pendingCount = 0 }
 }

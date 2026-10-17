@@ -9,7 +9,7 @@ import AFKCore
 public final class HostSession: ObservableObject, Identifiable {
     public let id: String
     public let name: String
-    public let feed = TerminalFeed()
+    public let feed: TerminalFeed
     @Published public private(set) var running = true
     @Published public private(set) var lease = ControlLease()
     public var onEvent: ((Message) -> Void)?
@@ -24,8 +24,8 @@ public final class HostSession: ObservableObject, Identifiable {
     private var lastRenewal = ProcessInfo.processInfo.systemUptime
     public var info: SessionInfo { SessionInfo(id: id, name: name, running: running, owner: lease.owner, epoch: lease.epoch) }
 
-    public init(id: String = UUID().uuidString, name: String = "Shell") {
-        self.id = id; self.name = name
+    public init(id: String = UUID().uuidString, name: String = "Shell", history: TerminalHistory? = nil) {
+        self.id = id; self.name = name; feed = TerminalFeed(history: history)
         process.onData = { [weak self] in self?.received($0) }
         process.onExit = { [weak self] in self?.exited($0) }
     }
@@ -85,6 +85,7 @@ public final class HostSession: ObservableObject, Identifiable {
     public func terminate() {
         guard running else { return }
         flushOutput()
+        feed.synchronizeHistory()
         process.terminate(); running = false; lease.claim(""); publishControl()
     }
     private func publishControl() {
@@ -108,6 +109,7 @@ public final class HostSession: ObservableObject, Identifiable {
     }
     private func exited(_ status: Int32) {
         flushOutput()
+        feed.synchronizeHistory()
         running = false; lease.claim("")
         var message = Message("exit", sessionID: id); message.message = "Sesión terminada (\(status))."; onEvent?(message); onState?()
     }
