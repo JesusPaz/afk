@@ -13,11 +13,11 @@ on:
         required: true
       platform:
         type: choice
-        options: [all, ios]
+        options: [all, ios, mac]
         default: all
 jobs:
   mac:
-    if: ${{ inputs.platform == 'all' }}
+    if: ${{ inputs.platform != 'ios' }}
     runs_on: macos-medium
     image: macos-tahoe-26.6-xcode-27.0
     environment: production
@@ -33,6 +33,7 @@ jobs:
           name: mac-release
           path: dist/*
   ios:
+    if: ${{ inputs.platform != 'mac' }}
     runs_on: macos-medium
     image: macos-tahoe-26.6-xcode-27.0
     environment: production

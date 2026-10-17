@@ -83,7 +83,8 @@ xcodebuild -exportArchive -archivePath "$work/AFK.xcarchive" -exportPath "$work/
 if [[ "$mode" == mac ]]; then
     app="$work/export/AFK.app"
     codesign --verify --deep --strict "$app"
-    lipo "$app/Contents/MacOS/AFK" -verify_arch arm64 x86_64
+    architectures=$(xcrun lipo -archs "$app/Contents/MacOS/AFK")
+    python3 -c 'import sys; assert set(sys.argv[1].split()) == {"arm64", "x86_64"}, "Mac archive must be universal"' "$architectures"
     ditto -c -k --keepParent "$app" "$work/notarize.zip"
     xcrun notarytool submit "$work/notarize.zip" --key "$work/AuthKey.p8" \
         --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait --output-format json > "$work/notary.json"

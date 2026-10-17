@@ -46,8 +46,8 @@ def extract_assets(archive, destination, tag):
 def main():
     tag, platform = sys.argv[1:]
     parse(tag)
-    if platform not in ('all', 'ios'):
-        raise ValueError('Expected all or ios')
+    if platform not in ('all', 'ios', 'mac'):
+        raise ValueError('Expected all, ios or mac')
     if subprocess.check_output(['git', 'status', '--porcelain']).strip():
         raise ValueError('Delivery requires a clean source tree')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
@@ -73,7 +73,7 @@ def main():
         print(f'EAS run: {run["id"]}; Apple build: {number}', flush=True)
         result.check_returncode()
         detail = json.loads(subprocess.check_output(['eas', 'workflow:view', run['id'], '--json', '--non-interactive'], cwd=source))
-        if platform == 'all':
+        if platform != 'ios':
             job = next(job for job in detail['jobs'] if job['key'] == 'mac')
             artifacts = job.get('artifacts') or []
             if len(artifacts) != 1:

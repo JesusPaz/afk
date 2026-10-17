@@ -196,6 +196,8 @@ missing signing configuration; it also checks HTTPS `/readyz` before signing.
   overwritten. A fresh dispatch refuses an existing tag.
 - If only Homebrew fails, rerun **Homebrew update** with the published tag after fixing
   tap configuration. An existing identical branch/PR is reused without force-pushing.
+- If only Mac failed after a successful iOS upload, retry the tested source with
+  `python3 scripts/release/eas-delivery.py <tag> mac` to avoid another iOS upload.
 - If Apple accepted a build before a connection failure, inspect App Store Connect
   before rerunning: another run attempt produces a new build number and another upload.
 - No automatic promotion to App Store review, external TestFlight, or homelab rollout.
