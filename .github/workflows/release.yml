@@ -90,6 +90,7 @@ jobs:
           gh release upload "$RELEASE_TAG" dist/* --clobber
           gh release edit "$RELEASE_TAG" --draft=false "${flags[@]}"
   homebrew:
+    if: vars.HOMEBREW_TAP_REPOSITORY != ''
     needs: publish
     uses: ./.github/workflows/homebrew.yml
     with:

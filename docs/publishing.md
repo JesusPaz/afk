@@ -44,7 +44,9 @@ non-cancelling GitHub queue and the reusable `apple.yml` workflow.
 
 Store Apple values below in AFK's **EAS production environment**, at project scope.
 Use secret visibility for private keys, PKCS#12 passwords and provisioning profiles.
-Keep Homebrew variables/secrets in GitHub. Never print secret values or attach them
+Keep Homebrew variables/secrets in GitHub. The tap PR is opt-in: set
+`HOMEBREW_TAP_REPOSITORY` together with its scoped token to enable it; without them,
+the release still includes the generated cask for a manual tap update. Never print secret values or attach them
 to a release. Uploading existing signing identities to EAS requires the owner's
 explicit authorization; do not revoke or replace Testa's credentials.
 
