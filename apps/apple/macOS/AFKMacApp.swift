@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct AFKMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @StateObject private var host = HostController()
+    @StateObject private var host = HostController(historyDirectory: TerminalHistory.defaultDirectory)
     var body: some Scene {
         WindowGroup("AFK") { MacWorkspace(host: host).onAppear { delegate.host = host } }
             .defaultSize(width: 1040, height: 720)
@@ -27,13 +27,14 @@ struct AFKMacApp: App {
 }
 
 private enum WorkspaceSheet: String, Identifiable {
-    case pair, devices, server
+    case pair, devices, server, permissions
     var id: String { rawValue }
     var title: String {
         switch self {
         case .pair: return L10n.text("Vincular iPhone")
         case .devices: return L10n.text("Dispositivos")
         case .server: return L10n.text("Conexión")
+        case .permissions: return L10n.text("Permisos de la sesión")
         }
     }
 }
@@ -43,6 +44,8 @@ struct MacWorkspace: View {
     @State private var selected: String?
     @AppStorage("relayURL") private var server = Bundle.main.object(forInfoDictionaryKey: "AFKRelayURL") as? String ?? "http://127.0.0.1:8787"
     @State private var sheet: WorkspaceSheet?
+    @State private var showingHistory = false
+    @State private var permissionSession: HostSession?
 
     private func createSession() {
         selected = host.create(name: L10n.format("Terminal %lld", host.sessions.count + 1))?.id
@@ -73,6 +76,7 @@ struct MacWorkspace: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 12) {
                     Divider()
+                    Button { showingHistory = true } label: { Label(L10n.text("Historial guardado"), systemImage: "clock") }
                     Button(action: createSession) { Label(L10n.text("Nueva sesión"), systemImage: "plus") }
                     Button { sheet = .devices } label: { Label(L10n.text("Dispositivos"), systemImage: "iphone") }
                     Button { sheet = .server } label: { Label(L10n.text("Conexión"), systemImage: "network") }
@@ -83,8 +87,18 @@ struct MacWorkspace: View {
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
         } detail: {
-            if let session = host.sessions.first(where: { $0.id == selected }) {
-                LocalTerminalPane(session: session, title: name(for: session))
+            if !host.sessions.isEmpty {
+                ZStack {
+                    ForEach(host.sessions) { session in
+                        LocalTerminalPane(session: session, active: session.id == selected, managePermissions: {
+                            permissionSession = session
+                            sheet = .permissions
+                        })
+                        .opacity(session.id == selected ? 1 : 0)
+                        .allowsHitTesting(session.id == selected)
+                        .accessibilityHidden(session.id != selected)
+                    }
+                }
             } else {
                 ContentUnavailableView {
                     Label(L10n.text("Tu terminal, contigo."), systemImage: "terminal")
@@ -95,6 +109,7 @@ struct MacWorkspace: View {
                 }
             }
         }
+        .navigationTitle(host.sessions.first(where: { $0.id == selected }).map { name(for: $0) } ?? "AFK")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button { sheet = .pair } label: {
@@ -108,8 +123,12 @@ struct MacWorkspace: View {
                 .accessibilityIdentifier("pair-iphone")
             }
         }
+        .sheet(isPresented: $showingHistory) {
+            SavedTerminalHistory(active: Set(host.sessions.filter(\.running).compactMap { $0.feed.history?.entry.id }))
+        }
         .sheet(item: $sheet) { destination in
-            MacConnectionSheet(host: host, server: $server, destination: destination)
+            MacConnectionSheet(host: host, server: $server, destination: destination,
+                               session: destination == .permissions ? permissionSession : nil)
         }
         .alert(L10n.text("No se pudo completar la acción"), isPresented: Binding(
             get: { host.error != nil && sheet == nil },
@@ -158,10 +177,12 @@ private struct MacConnectionSheet: View {
     @ObservedObject var host: HostController
     @Binding var server: String
     @State var destination: WorkspaceSheet
+    var session: HostSession? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
     @State private var revokeID: String?
     @State private var revokeAll = false
+    @State private var upgradeIdentity = false
     @State private var copied = false
     @State private var candidate: PairingCandidate?
     @State private var approving = false
@@ -172,7 +193,7 @@ private struct MacConnectionSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(destination.title).font(.title2.weight(.semibold))
-                    Text(destination == .pair ? L10n.text("Tu misma terminal, también en el teléfono.") : destination == .devices ? L10n.text("Decide quién puede acceder a tus sesiones.") : L10n.text("El punto de encuentro entre tu Mac y tu iPhone."))
+                    Text(destination == .permissions ? (session?.name ?? "") : destination == .pair ? L10n.text("Tu misma terminal, también en el teléfono.") : destination == .devices ? L10n.text("Decide quién puede acceder a tus sesiones.") : L10n.text("El punto de encuentro entre tu Mac y tu iPhone."))
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 16)
@@ -183,6 +204,7 @@ private struct MacConnectionSheet: View {
                 VStack(alignment: .leading, spacing: 24) {
                     if destination == .pair { pairingContent }
                     else if destination == .devices { devicesContent }
+                    else if destination == .permissions { sessionPermissionsContent }
                     else { serverContent }
                     if let error = host.error { InlineNotice(text: error) }
                 }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
@@ -196,6 +218,9 @@ private struct MacConnectionSheet: View {
         .onChange(of: destination) { old, next in
             if old == .pair && next != .pair { host.cancelPairing() }
         }
+        .confirmationDialog(L10n.text("¿Proteger la identidad de este Mac?"), isPresented: $upgradeIdentity) {
+            Button(L10n.text("Proteger y volver a vincular")) { Task { await host.upgradeIdentity(server: server) } }
+        } message: { Text(L10n.text("Se retirarán los vínculos anteriores. Vuelve a vincular tus iPhones con un QR nuevo. Las terminales locales seguirán abiertas.")) }
         .confirmationDialog(L10n.text("¿Revocar todos los dispositivos?"), isPresented: $revokeAll) {
             Button(L10n.text("Revocar todos los dispositivos"), role: .destructive) { host.revokeAllDevices() }
         } message: { Text(L10n.text("Todos necesitarán una nueva invitación. Las terminales locales seguirán abiertas.")) }
@@ -225,7 +250,7 @@ private struct MacConnectionSheet: View {
                 Button(L10n.text("Rechazar"), role: .destructive) { host.cancelPairing() }
             } else if completed {
                 Text(L10n.text("Vinculado. Comparte sesiones desde tu Mac"))
-                Button(L10n.text("Sesiones y permisos")) { destination = .devices }
+                Button(L10n.text("Sesiones y permisos")) { destination = session == nil ? .devices : .permissions }
             } else if busy {
                 HStack(spacing: 12) { ProgressView().controlSize(.small); Text(L10n.text("Preparando invitación segura…")).foregroundStyle(.secondary) }
                     .frame(maxWidth: .infinity, minHeight: 128)
@@ -273,7 +298,38 @@ private struct MacConnectionSheet: View {
         }
     }
 
+    @ViewBuilder private var sessionPermissionsContent: some View {
+        Text(L10n.text("Elige qué dispositivos pueden ver o controlar esta sesión."))
+            .foregroundStyle(.secondary)
+        if busy { ProgressView(L10n.text("Buscando dispositivos…")) }
+        else if let session {
+            if host.clients.isEmpty {
+                Text(L10n.text("Vincula un iPhone para compartir esta sesión."))
+                Button(L10n.text("Vincular iPhone")) { destination = .pair }
+                    .buttonStyle(.borderedProminent)
+            } else {
+                ForEach(host.clients) { client in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(client.name, systemImage: "iphone").font(.headline)
+                        Text(host.connectedClients.contains(client.id) ? L10n.text("Conectado") : L10n.text("Sin conexión"))
+                            .font(.caption).foregroundStyle(.secondary)
+                        TrustedDeviceAccess(host: host, client: client.id)
+                        if !host.access.isTrusted(client.id) {
+                            SessionPermissions(host: host, client: client.id, session: session)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @ViewBuilder private var devicesContent: some View {
+        if host.hardwareIdentity {
+            Label(L10n.text("Identidad del Mac protegida por Secure Enclave"), systemImage: "lock.shield")
+        } else {
+            Text(L10n.text("Protege la identidad del Mac antes de autorizar dispositivos de confianza."))
+            Button(L10n.text("Proteger identidad del Mac…")) { upgradeIdentity = true }
+        }
         if busy { ProgressView(L10n.text("Buscando dispositivos…")) }
         else if host.clients.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
@@ -290,7 +346,7 @@ private struct MacConnectionSheet: View {
                 .labelStyle(.titleAndIcon)
         }
         Divider()
-        Text(L10n.text("Las sesiones nuevas son privadas. Los permisos se borran al salir de AFK o cortar el acceso remoto.")).font(.caption).foregroundStyle(.secondary)
+        Text(L10n.text("Las sesiones nuevas son privadas salvo para dispositivos de confianza. Sus permisos persisten hasta retirarlos o cortar todo acceso remoto.")).font(.caption).foregroundStyle(.secondary)
         Button(L10n.text("Cortar todo acceso remoto"), role: .destructive) { host.stopRemoteAccess() }
         Button(L10n.text("Revocar todos los dispositivos"), role: .destructive) { revokeAll = true }.disabled(host.clients.isEmpty)
         accessHistory
@@ -309,7 +365,8 @@ private struct MacConnectionSheet: View {
                 Spacer()
                 Button(L10n.text("Revocar acceso"), role: .destructive) { revokeID = client.id }
             }
-            DevicePermissions(host: host, client: client.id)
+            TrustedDeviceAccess(host: host, client: client.id)
+            if !host.access.isTrusted(client.id) { DevicePermissions(host: host, client: client.id) }
         }
     }
     private var accessHistory: some View {
@@ -353,7 +410,7 @@ private struct MacConnectionSheet: View {
         if destination == .server { return }
         busy = true; copied = false; host.error = nil
         defer { busy = false }
-        if destination == .devices { await host.refreshClients(server: server); return }
+        if destination == .devices || destination == .permissions { await host.refreshClients(server: server); return }
         if destination == .pair {
             completed = false
             await host.beginPairing(server: server)
@@ -402,7 +459,8 @@ private struct AccessToggle: View {
 
 struct LocalTerminalPane: View {
     @ObservedObject var session: HostSession
-    let title: String
+    let active: Bool
+    let managePermissions: () -> Void
     @State private var confirmEnd = false
     private var localControl: Bool { session.lease.owner == "local" }
     var body: some View {
@@ -424,13 +482,20 @@ struct LocalTerminalPane: View {
                     }
                     .keyboardShortcut("l", modifiers: [.command, .shift])
                     .help(L10n.text("Cambiar el control del teclado (⌘⇧L)"))
+                    .disabled(!active)
                 }
                 Menu {
+                    Button(action: managePermissions) {
+                        Label(L10n.text("Permisos de la sesión…"), systemImage: "person.badge.key")
+                    }
+                    .accessibilityIdentifier("session-permissions")
+                    Divider()
                     Button(L10n.text("Terminar sesión…"), role: .destructive) { confirmEnd = true }.disabled(!session.running)
                 } label: { Label(L10n.text("Sesión"), systemImage: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
             }.padding(.horizontal, 16).padding(.vertical, 12)
             Divider()
-            TerminalCanvas(feed: session.feed, editable: session.running && localControl, input: session.localInput, resize: session.localResize)
+            HistoryRecordingStatus(feed: session.feed)
+            TerminalCanvas(feed: session.feed, editable: session.running && localControl, input: session.localInput, resize: session.localResize, active: active)
                 .id(session.id)
             HStack {
                 Label(session.running ? L10n.text("En ejecución en este Mac") : L10n.text("Proceso finalizado"), systemImage: "desktopcomputer")
@@ -438,7 +503,7 @@ struct LocalTerminalPane: View {
                 Text(L10n.text("Tamaño del dispositivo que escribe")).help(L10n.text("Recupera el control para ajustar la terminal a esta ventana"))
             }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
         }
-        .navigationTitle(title)
+
         .confirmationDialog(L10n.text("¿Terminar esta sesión?"), isPresented: $confirmEnd) {
             Button(L10n.text("Terminar sesión"), role: .destructive) { session.terminate() }
         } message: { Text(L10n.text("Se cerrará la shell para todos los dispositivos. Esta acción no se puede deshacer.")) }
@@ -470,6 +535,38 @@ private struct AccessDuration: View {
             Text(L10n.text("15 minutos")).tag(900.0)
             Text(L10n.text("1 hora")).tag(3600.0)
             Text(L10n.text("8 horas")).tag(28800.0)
+        }
+    }
+}
+
+private struct TrustedDeviceAccess: View {
+    @ObservedObject var host: HostController
+    let client: String
+    @State private var confirming = false
+    @State private var busy = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if host.access.isTrusted(client) {
+                Label(L10n.text("Dispositivo de confianza · acceso completo"), systemImage: "checkmark.shield")
+                Text(L10n.text("Puede leer, controlar, crear y cerrar todas las sesiones, incluidas las nuevas. Requiere Face ID o Touch ID al conectar."))
+                    .font(.caption).foregroundStyle(.secondary)
+                Button(L10n.text("Retirar confianza"), role: .destructive) {
+                    Task { busy = true; defer { busy = false }; await host.setTrustedAccess(client, enabled: false) }
+                }
+            } else if host.supportsTrustedAccess(client) {
+                Button(L10n.text("Confiar en este dispositivo…"), systemImage: "checkmark.shield") { confirming = true }
+            } else {
+                Text(L10n.text("Para dar acceso completo, protege la identidad del Mac y vuelve a vincular el iPhone con la app actualizada y Face ID activado."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .disabled(busy)
+        .confirmationDialog(L10n.text("¿Dar acceso completo a este dispositivo?"), isPresented: $confirming) {
+            Button(L10n.text("Confiar y dar acceso completo")) {
+                Task { busy = true; defer { busy = false }; await host.setTrustedAccess(client, enabled: true) }
+            }
+        } message: {
+            Text(L10n.text("Podrá leer, controlar, crear y cerrar todas las sesiones, también las futuras y después de reiniciar AFK. Esto permite ejecutar comandos con tu usuario del Mac. Puedes retirar la confianza en cualquier momento."))
         }
     }
 }

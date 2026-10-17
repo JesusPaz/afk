@@ -4,6 +4,21 @@ import AFKCore
 @testable import AFKHost
 
 @MainActor final class RemoteAccessTests: XCTestCase {
+    func testTrustedAccessCoversFutureSessionsAndIsRemovedImmediately() {
+        let access = RemoteAccess()
+        access.setTrustedClients(["trusted"])
+        for session in ["existing", "future"] {
+            XCTAssertEqual(access.level(client: "trusted", session: session), .control)
+            XCTAssertTrue(access.canClose(client: "trusted", session: session))
+            XCTAssertEqual(access.level(client: "other", session: session), .none)
+        }
+        XCTAssertTrue(access.canCreate(client: "trusted"))
+        access.remove(client: "trusted")
+        XCTAssertEqual(access.level(client: "trusted", session: "existing"), .none)
+        XCTAssertFalse(access.canCreate(client: "trusted"))
+        access.setTrustedClients(["trusted"]); access.removeAll()
+        XCTAssertFalse(access.isTrusted("trusted"))
+    }
     func testInputReceiptsDoNotRepeatInputOrSurviveLeaseChanges() {
         let session = HostSession()
         session.start()

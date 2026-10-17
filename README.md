@@ -71,13 +71,52 @@ The unsigned commands above are compile checks. To **run** the iPhone simulator 
 ## Current boundaries
 
 - Up to eight sessions and eight connected clients per Mac; iPhone remembers one Mac.
-- The current controller determines the shared terminal size: Mac window or iPhone viewport (including rotation and keyboard). Observers retain that grid and can scroll when it is larger than their screen. ANSI output and ordered resize events are replayed within a 256 KiB budget; after overflow, attaching fails explicitly while the local process continues.
+- The current controller determines the shared terminal size: Mac window or iPhone viewport (including rotation and keyboard). Observers retain that grid and can scroll when it is larger than their screen. Network replay remains limited to 256 KiB; after overflow, a new remote attach fails explicitly while the local process continues. Local Mac history is stored separately on disk and is not subject to this replay limit.
 - Sessions survive closing the Mac window, **not quitting AFK, reboot or sleep with an active network connection**. There is no separate background helper yet.
 - Manual reconnect. No offline keystroke queue or automatic retries of input.
 - SwiftUI screens implement the functional flows; final visual polish and accessibility/device validation remain.
 - No signed installer, App Store release, accounts, file transfer, audio, screen mirroring, Android, Windows or Linux host.
 
 See [architecture](docs/architecture.md), [protocol](docs/protocol.md), [roadmap](docs/roadmap.md). MIT licensed.
+
+## Trusted devices
+
+New pairings use Secure Enclave identities. iPhone requires enrolled Face ID/Touch ID
+for each connection; the Mac proves possession of its own pinned hardware key.
+In **Devices**, explicitly choose **Trust this device…** to grant persistent access
+to all current/future sessions and permission to create/close them. Mac authentication
+is required. **Remove trust** disconnects the phone; **Stop all remote access** also
+removes persistent grants. Session permissions remain available from the Session menu.
+
+For an existing software identity, choose **Protect Mac identity…** first and confirm
+removing old pairings. Then pair the updated iPhone app again and grant trust.
+Changing enrolled phone biometrics requires pairing again. Secure Enclave is required
+for new identities; simulator/software fallback is not enabled in the app.
+See [security boundaries](docs/security.md) and [protocol](docs/e2ee.md).
+
+## Saved terminal history
+
+Mac sessions now record all output and ordered size changes under
+`~/Library/Application Support/AFK/Session History`. Recordings survive quitting AFK
+and restarting the Mac until explicitly deleted in **Saved history**. They do not
+restart the shell or execute recorded commands. Active recordings cannot be deleted;
+end the session first. Existing sessions from an older app cannot recover output
+already discarded before this feature was installed.
+
+Switching sessions keeps each live renderer attached, including its alternate screen
+and background updates. The live Mac terminal retains 10,000 scrollback lines in RAM.
+**Saved history** provides a recording-position slider and previous/next controls to
+browse the complete disk recording in bounded batches, including earlier output
+outside live scrollback. Opening a recording of an active session captures its current
+length; reopen it to refresh. Reopening a live window reconstructs the renderer from
+the recording, which can take time for long sessions.
+
+The recording files are owner-only (directories `0700`, files `0600`), contain terminal
+output that may include secrets, and are not separately encrypted by AFK. They never
+go to the relay. There is no automatic age/size deletion; available disk space is the
+limit. A recording failure is shown in the session while the shell continues running.
+Normal termination flushes the file; a crash/power loss can leave an incomplete tail,
+reported when reading it. This does not guarantee recovery of unwritten output.
 
 ## Languages
 

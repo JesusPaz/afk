@@ -82,7 +82,6 @@ final class RemoteModel: ObservableObject {
         defer { pairing = false }
         do {
             _ = try SecureInvitation.decode(invitation)
-            try await unlock.require()
             guard generation == pairingGeneration else { throw SecureError.disconnected }
             let saved = try await relay.pair(invitation: invitation)
             credentials = saved.credentials
@@ -95,7 +94,10 @@ final class RemoteModel: ObservableObject {
         ready = false; reconnecting = true
         Task {
             defer { reconnecting = false }
-            do { try await unlock.require(); relay.connect() }
+            do {
+                if relay.saved?.identity.requiresBiometry != true { try await unlock.require() }
+                relay.connect()
+            }
             catch { relay.disconnect(); self.error = error.localizedDescription }
         }
     }

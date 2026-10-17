@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import LocalAuthentication
 
 private struct ControlOffer: Decodable { let type: String; let id: String; let clientID: String }
 private struct SecureHostConnection: Codable { let id: String; let token: String }
@@ -109,6 +110,19 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
         transport.send(welcome)
         var m = Message("clientConnected"); m.clientID = id; onMessage?(m)
     }
+    public func setFullAccess(_ id: String, enabled: Bool) throws {
+        guard let trust else { throw SecureError.disconnected }
+        do { try trust.setFullAccess(id, enabled: enabled); if !enabled { drop(id) } }
+        catch { disconnect(); throw error }
+    }
+    public func clearFullAccess() throws {
+        do { try trust?.clearFullAccess() } catch { disconnect(); throw error }
+    }
+    public func upgradeIdentity() throws {
+        disconnect()
+        guard let trust else { throw SecureError.disconnected }
+        try trust.upgradeIdentity()
+    }
     public func revokeAll() throws {
         disconnect()
         try trust?.revokeAll()
@@ -119,7 +133,7 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
         if channels[offer.clientID] != nil { return }
         guard channels.count < 8 else { return }
         let transport = SecureTransport(); channels[offer.clientID] = transport
-        let helloDeadline = ContinuousClock.now.advanced(by: .seconds(15))
+        let helloDeadline = ContinuousClock.now.advanced(by: .seconds(60))
         var certificate: Data?
         transport.onReady = { certificate = $0 }
         transport.onClose = { [weak self, weak transport] in
@@ -144,7 +158,7 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
                     } else {
                         guard packet.ceremony == 3 else { throw SecureError.unauthorized }
                         let reservation = try trust.reserve(id: offer.clientID, name: packet.name ?? "iPhone",
-                            certificate: certificate, invitationID: packet.invitationID, secret: packet.secret)
+                            certificate: certificate, invitationID: packet.invitationID, secret: packet.secret, biometricIdentity: packet.biometricIdentity == true)
                         let hostNonce = try SecretStore.randomToken()
                         let digest = PairingTranscript.digest(server: base.absoluteString, hostID: host.id,
                             clientID: offer.clientID, invitationID: packet.invitationID!,
@@ -176,7 +190,7 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
             }
         }
         timeouts[offer.clientID] = Task { [weak self, weak transport] in
-            try? await Task.sleep(for: .seconds(15))
+            try? await Task.sleep(for: .seconds(60))
             guard !Task.isCancelled, let self, self.channels[offer.clientID] === transport else { return }; self.drop(offer.clientID)
         }
         // This TLS admission snapshot only permits a handshake. Authorization is checked
@@ -232,25 +246,39 @@ public struct SecurePhoneConnection: Codable {
     private let api = RelayClient()
     private let account: String
     private let persist: (SecurePhoneConnection) throws -> Void
+    private let makeIdentity: @Sendable (LAContext) throws -> DeviceIdentity
+    private var signingContext: LAContext?
     private var connectionError: Error?
     public private(set) var saved: SecurePhoneConnection?
     public init(account: String = "secure-phone-v2") {
         self.account = account; self.persist = { try SecretStore.write($0, account: account) }
+        self.makeIdentity = { try DeviceIdentity.createSecureEnclave(requireBiometry: true, context: $0) }
     }
-    init(account: String, persist: @escaping (SecurePhoneConnection) throws -> Void) {
-        self.account = account; self.persist = persist
+    init(account: String, persist: @escaping (SecurePhoneConnection) throws -> Void, makeIdentity: @escaping @Sendable (LAContext) throws -> DeviceIdentity = { _ in try DeviceIdentity.create() }) {
+        self.account = account; self.persist = persist; self.makeIdentity = makeIdentity
     }
     public func restore() throws -> SecurePhoneConnection? { saved = try SecretStore.read(account); return saved }
     public func pair(invitation text: String, name: String = "iPhone") async throws -> SecurePhoneConnection {
         disconnect(); connectionError = nil; let pairingGeneration = generation
         let invite = try SecureInvitation.decode(text)
         let id = UUID().uuidString, token = try SecretStore.randomToken()
-        let identity = try DeviceIdentity.create()
+        let context = LAContext(); signingContext = context
+        defer { if signingContext === context { context.invalidate(); signingContext = nil } }
+        let factory = makeIdentity
+        let identity: DeviceIdentity
+        do {
+            identity = try await withTaskCancellationHandler {
+                try await Task.detached { try factory(context) }.value
+            } onCancel: { context.invalidate() }
+            try Task.checkCancellation()
+        } catch { context.invalidate(); throw error }
+        guard generation == pairingGeneration else { context.invalidate(); throw SecureError.disconnected }
         let host: HostIdentity = try await api.request(URL(string: invite.server)!, path: "v2/clients", body: ["id": id, "token": token, "code": invite.code, "name": name])
         guard generation == pairingGeneration else { throw SecureError.disconnected }
         guard host.id == invite.hostID, host.code == invite.code else { throw SecureError.unauthorized }
         let next = SecurePhoneConnection(server: invite.server, credentials: ClientCredentials(clientID: id, token: token, host: host), identity: identity, hostFingerprint: invite.fingerprint, invitation: invite)
-        connect(using: next); let connectionGeneration = generation
+        signingContext = nil
+        connect(using: next, context: context); let connectionGeneration = generation
         do {
             for _ in 0..<2800 {
                 try Task.checkCancellation()
@@ -270,12 +298,13 @@ public struct SecurePhoneConnection: Codable {
         guard let saved else { return }
         connect(using: saved)
     }
-    private func connect(using saved: SecurePhoneConnection) {
+    private func connect(using saved: SecurePhoneConnection, context: LAContext = LAContext()) {
         disconnect()
+        signingContext = context
         var approvalID: String?
         let clock = ContinuousClock()
-        let invitationDeadline = clock.now.advanced(by: .seconds(max(0, saved.invitation?.expires.timeIntervalSinceNow ?? 15)))
-        var phaseDeadline = min(invitationDeadline, clock.now.advanced(by: .seconds(15)))
+        let invitationDeadline = clock.now.advanced(by: .seconds(max(0, saved.invitation?.expires.timeIntervalSinceNow ?? 60)))
+        var phaseDeadline = min(invitationDeadline, clock.now.advanced(by: .seconds(60)))
         let transport = SecureTransport(); self.transport = transport
         status = L10n.text("Conectando…")
         let nonce: String
@@ -284,6 +313,7 @@ public struct SecurePhoneConnection: Codable {
             guard let self, let transport, self.transport === transport else { return }
             var hello = SecurePacket(type: "hello"); hello.server = saved.server; hello.hostID = saved.credentials.host.id
             hello.clientID = saved.credentials.clientID; hello.nonce = nonce; hello.name = "iPhone"
+            hello.biometricIdentity = saved.identity.isHardwareBacked && saved.identity.requiresBiometry == true
             hello.ceremony = saved.invitation == nil ? nil : 3
             hello.invitationID = saved.invitation?.id; hello.secret = saved.invitation?.secret
             transport.send(hello)
@@ -330,16 +360,17 @@ public struct SecurePhoneConnection: Codable {
         }
         transport.onClose = { [weak self, weak transport] in guard let self, self.transport === transport else { return }; self.disconnect() }
         timeout = Task { [weak self, weak transport] in
-            try? await Task.sleep(for: .seconds(15)); guard !Task.isCancelled, let self, self.transport === transport else { return }; self.disconnect()
+            try? await Task.sleep(for: .seconds(60)); guard !Task.isCancelled, let self, self.transport === transport else { return }; self.disconnect()
         }
         Task { [weak self, weak transport] in
             guard let transport else { return }
-            do { try await transport.connect(base: URL(string: saved.server)!, path: "v2/connect", token: saved.credentials.token, identity: saved.identity, server: false, accepts: { DeviceIdentity.fingerprint($0) == saved.hostFingerprint }) }
+            do { try await transport.connect(base: URL(string: saved.server)!, path: "v2/connect", token: saved.credentials.token, identity: saved.identity, server: false, authenticationContext: context, accepts: { DeviceIdentity.fingerprint($0) == saved.hostFingerprint }) }
             catch { if let self, self.transport === transport { self.disconnect() } }
         }
     }
     public func send(_ m: Message) { guard authorized else { return }; var p = SecurePacket(type: "message"); p.message = m; transport?.send(p) }
     public func disconnect() {
+        signingContext?.invalidate(); signingContext = nil
         generation = UUID(); comparisonCode = nil; let closing = transport; transport = nil; closing?.close(); timeout?.cancel(); timeout = nil; authorized = false
         status = L10n.text("Sin conexión"); onDisconnect?()
     }

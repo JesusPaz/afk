@@ -40,11 +40,19 @@ public final class TerminalFeed: ObservableObject {
     @Published public private(set) var size = TerminalSize.initial
     public var sequence: UInt64 = 0
     public var snapshot: [TerminalEvent]? { replay.snapshot }
-    public init() {}
+    public let history: TerminalHistory?
+    @Published public private(set) var historyError: String?
+    public init(history: TerminalHistory? = nil) { self.history = history }
+    public func synchronizeHistory() {
+        do { try history?.synchronize() } catch { historyError = error.localizedDescription }
+    }
     public func append(_ bytes: Data) { append(TerminalEvent(data: bytes)) }
     public func resize(_ size: TerminalSize) { guard size.isValid else { return }; append(TerminalEvent(size: size)) }
     private func append(_ event: TerminalEvent) {
         if let size = event.size { self.size = size }
+        if historyError == nil {
+            do { try history?.append(event) } catch { historyError = error.localizedDescription }
+        }
         replay.append(event)
         for listener in listeners.values { listener([event], false) }
     }
@@ -58,9 +66,15 @@ public final class TerminalFeed: ObservableObject {
         for listener in listeners.values { listener(events, true) }
         return true
     }
-    public func observe(_ callback: @escaping ([TerminalEvent], Bool) -> Void) -> UUID {
+    public func observe(replayHistory: Bool = false, _ callback: @escaping ([TerminalEvent], Bool) -> Void) -> UUID {
         let id = UUID(); listeners[id] = callback
-        if let snapshot { callback(snapshot, true) }
+        if replayHistory, let history {
+            callback([], true)
+            do {
+                let reader = try TerminalHistory.Reader(history.entry)
+                while reader.offset < reader.length { callback(try reader.next(), false) }
+            } catch { historyError = error.localizedDescription }
+        } else if let snapshot { callback(snapshot, true) }
         return id
     }
     public func remove(_ id: UUID) { listeners.removeValue(forKey: id) }

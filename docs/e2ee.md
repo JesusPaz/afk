@@ -5,9 +5,18 @@ independently audited remote-access product. Tracking: #3, owner @JesusPaz.
 
 ## Trust and enrollment
 
-The Mac and iPhone generate independent P-256 certificate/private-key identities.
-Keychain stores each identity with device-only accessibility. The phone record
-requires an unlocked device; the Mac can retain its host identity while serving.
+New Mac and iPhone identities use independent Secure Enclave P-256 keys with
+self-signed certificates. Keychain stores only the opaque device-bound key blob.
+The iPhone key ACL is `WhenUnlockedThisDeviceOnly` + `privateKeyUsage` +
+`biometryCurrentSet`; the Mac uses `AfterFirstUnlockThisDeviceOnly` +
+`privateKeyUsage` so it can serve while unattended. The supported NIOSSL custom-key
+callback hashes/signs TLS transcript bytes with CryptoKit on a worker queue, never
+blocking NIO's event loop. TLS negotiation is bounded to 60 seconds for biometric
+interaction. The transport invalidates its LAContext on close/background/cancellation.
+A connection has a fresh LAContext; there is no cached authentication across connections.
+Software keys can only be created by internal test fixtures; previously saved software
+identities remain readable for migration. No private key is transferred to Secure Enclave:
+the explicit migration creates a new key, clears peers, and requires new pairing.
 No private key or enrollment capability is sent to the relay HTTP API.
 
 The Mac creates `AFK3:` invitations locally: schema 3, canonical HTTPS origin,
@@ -118,15 +127,21 @@ is checked on every application packet; input also needs the current lease epoch
 and a fresh sequence. The relay rechecks transport credentials every 30 seconds,
 pings peers, and caps connection lifetime at eight hours.
 
-The native iPhone UI requires Face ID/Touch ID or the device passcode for pairing
-and each connection. Backgrounding invalidates pending local authentication,
+New iPhone identities require Face ID/Touch ID in the hardware key operation for
+pairing and every TLS connection, without a passcode fallback. Legacy identities
+retain their existing UI device-owner authentication until deliberately replaced. Backgrounding invalidates pending local authentication,
 closes transport, and clears visible terminal contents. A privacy overlay hides
 content while inactive. Late HTTP/TLS results cannot reopen a suspended generation.
 No remote configuration, clipboard synchronization, file-transfer endpoint or
 system-wide phone control is exposed. Pairing grants no shell permissions. The Mac explicitly shares individual sessions
 per device, filters all outgoing events and validates each requested operation.
-Temporary control and separate creation/closing grants are bounded locally; see
-`security.md`. Controlling a shared shell still executes as the Mac user, without
+Temporary control and separate creation/closing grants are bounded locally. An
+explicit trusted-device grant instead covers all sessions and creation/closing,
+persists in the same Keychain record as its exact certificate, and is checked locally.
+The `biometricIdentity` hello field is saved only during consent-based enrollment;
+changing it during reconnect cannot upgrade a peer. It describes genuine-app behavior,
+not Apple attestation. Only a hardware-backed Mac with an enrolled biometric-capable
+phone can grant persistent full access through the UI. See `security.md`. Controlling a shared shell still executes as the Mac user, without
 OS isolation or command filtering.
 
 ## Verification
@@ -135,12 +150,18 @@ OS isolation or command filtering.
   TLS downgrade and ALPN, tampered/replayed/reordered/cross-session/incomplete
   records, fragmented bidirectional encryption, pre-auth writes; invitation expiry,
   attempt persistence, one use, restart, lost welcome, failed writes, revocation;
-  untrusted outer WSS certificate; local-auth denial, no caching, stale unlock.
+  untrusted outer WSS certificate; local-auth denial, no caching, stale unlock;
+  hardware-key serialization without plaintext, persistent full-access grants,
+  failed persistence, legacy-grant rejection and explicit identity migration.
+  Secure Enclave tests skip when hardware is unavailable.
 - `./scripts/test-server.sh`: Go race detector with real PostgreSQL, token/role
   checks, legacy rejection, opaque routing, revoked credentials, malformed/text/
   oversized frames and aggregate probe/metrics behavior.
 - `./scripts/test-secure.sh`: two real native TLS phones, Mac PTY, command output,
   exclusive control, stale-owner input, resize, snapshot, reconnect and revocation.
+  The primary scenario uses real Secure Enclave keys on both ends (without biometric
+  prompts in the test phone), rejects substitution of the pinned certificate’s
+  hardware key before welcome, and reconnects successfully with the original key.
   Test database identities and current test Keychain records are removed.
 - `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...`: dependency vulnerability check.
 
@@ -148,3 +169,22 @@ The earlier `experiments/e2ee-tls` is historical design evidence. Production use
 the supported custom verification API, not that prototype's underscored API.
 Physical Face ID, device backgrounding and public Cloudflare WSS still need an
 actual iPhone test. Automated local checks are not a substitute for a security audit.
+
+## Physical acceptance for hardware trust
+
+Owner: JesusPaz, tracking #3. These checks require the updated apps on the M4 Mac
+and iPhone 13 Pro; automated TLS tests do not prove Face ID behavior.
+
+- Confirm Face ID is requested on each new connection and after background/resume.
+  Cancel/fail it: no sessions, commands or terminal contents may be exposed.
+- Lock/background while authentication is pending: late success must not connect.
+- Confirm strict biometric signing cannot be bypassed with the device passcode.
+- After deliberate biometric re-enrollment, the old key must fail and require re-pairing.
+- Grant trust locally, create another terminal and restart AFK: access persists.
+  Removing trust and stopping all access must disconnect/clear access immediately.
+- Verify the Mac can authenticate itself while unattended after first unlock.
+- Confirm live dictation corrections still stream without per-keystroke prompts.
+
+Apple references: [Secure Enclave keys](https://developer.apple.com/documentation/security/protecting-keys-with-the-secure-enclave),
+[current biometric enrollment](https://developer.apple.com/documentation/security/secaccesscontrolcreateflags/biometrycurrentset),
+[App Attest’s separate integrity checks](https://developer.apple.com/documentation/devicecheck/establishing-your-app-s-integrity).

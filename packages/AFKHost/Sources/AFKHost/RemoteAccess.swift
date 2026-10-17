@@ -4,7 +4,7 @@ import AFKCore
 
 public enum SessionAccess: String, CaseIterable { case none, readOnly, control }
 
-// Grants belong to this running Mac process. Restarting never resurrects access.
+// Per-session grants are transient; explicitly trusted devices come from the persistent identity store.
 @MainActor public final class RemoteAccess {
     private struct Deadline {
         let date: Date
@@ -16,6 +16,9 @@ public enum SessionAccess: String, CaseIterable { case none, readOnly, control }
         var idle: Deadline?
         var close: Deadline?
     }
+    private var trustedClients: Set<String> = []
+    func setTrustedClients(_ clients: Set<String>) { trustedClients = clients }
+    public func isTrusted(_ client: String) -> Bool { trustedClients.contains(client) }
     private var grants: [String: [String: Grant]] = [:]
     private var creators: [String: Deadline] = [:]
     private let now: () -> Date
@@ -27,16 +30,17 @@ public enum SessionAccess: String, CaseIterable { case none, readOnly, control }
     private func deadline(_ duration: TimeInterval) -> Deadline { Deadline(date: now().addingTimeInterval(duration), uptime: uptime() + duration) }
     private func valid(_ value: Deadline?) -> Bool { value.map { !$0.expired(now(), uptime()) } ?? false }
     public func level(client: String, session: String) -> SessionAccess {
+        if isTrusted(client) { return .control }
         guard let grant = grants[client]?[session] else { return .none }
         return valid(grant.control) && (grant.idle == nil || valid(grant.idle)) ? .control : .readOnly
     }
     public func controlUntil(client: String, session: String) -> Date? {
-        guard level(client: client, session: session) == .control else { return nil }
+        guard !isTrusted(client), level(client: client, session: session) == .control else { return nil }
         return grants[client]?[session]?.control?.date
     }
-    public func canClose(client: String, session: String) -> Bool { valid(grants[client]?[session]?.close) }
-    public func canCreate(client: String) -> Bool { valid(creators[client]) }
-    public func createUntil(client: String) -> Date? { canCreate(client: client) ? creators[client]?.date : nil }
+    public func canClose(client: String, session: String) -> Bool { isTrusted(client) || valid(grants[client]?[session]?.close) }
+    public func canCreate(client: String) -> Bool { isTrusted(client) || valid(creators[client]) }
+    public func createUntil(client: String) -> Date? { !isTrusted(client) && canCreate(client: client) ? creators[client]?.date : nil }
     public func set(client: String, session: String, level: SessionAccess, duration: TimeInterval, allowClose: Bool = false) {
         guard duration.isFinite, duration > 0, duration <= 28800 else { return }
         if level == .none { grants[client]?.removeValue(forKey: session); return }
@@ -77,8 +81,8 @@ public enum SessionAccess: String, CaseIterable { case none, readOnly, control }
         for client in Array(creators.keys) where !canCreate(client: client) { creators.removeValue(forKey: client); expired.append((client, nil)) }
         return expired
     }
-    func remove(client: String) { grants.removeValue(forKey: client); creators.removeValue(forKey: client) }
-    func removeAll() { grants.removeAll(); creators.removeAll() }
+    func remove(client: String) { trustedClients.remove(client); grants.removeValue(forKey: client); creators.removeValue(forKey: client) }
+    func removeAll() { trustedClients.removeAll(); grants.removeAll(); creators.removeAll() }
 }
 
 public struct AccessEvent: Codable, Identifiable {

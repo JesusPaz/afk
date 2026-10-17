@@ -47,6 +47,9 @@ final class TerminalContainer: PlatformView {
         cell = CGSize(width: terminal.getOptimalFrameSize().width - first.width, height: first.height / 24)
         extraWidth = first.width - 80 * cell.width
         terminal.resize(cols: 80, rows: 24)
+        #if os(macOS)
+        terminal.getTerminal().changeScrollback(10_000)
+        #endif
         addSubview(scroll)
         #if os(macOS)
         scroll.drawsBackground = false
@@ -129,6 +132,8 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
     var editable: Bool
     var observation: UUID?
     private var replaying = false
+    private var attaching = false
+    var active = true
     private var proposed: TerminalSize?
     private var pending: DispatchWorkItem?
     init(feed: TerminalFeed, editable: Bool, input: @escaping (Data) -> Void, resize: @escaping (TerminalSize) -> Void) {
@@ -144,7 +149,14 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
             self.pending = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
         }
-        observation = feed.observe { [weak self, weak container] events, reset in
+        attaching = true
+        defer { attaching = false }
+        #if os(macOS)
+        let restoreHistory = true
+        #else
+        let restoreHistory = false
+        #endif
+        observation = feed.observe(replayHistory: restoreHistory) { [weak self, weak container] events, reset in
             guard let self, let container else { return }
             let view = container.terminal
             self.replaying = reset
@@ -162,7 +174,7 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
         }
     }
     func detach() { pending?.cancel(); if let observation { feed.remove(observation) } }
-    func send(source: TerminalView, data: ArraySlice<UInt8>) { if editable && !replaying { input(Data(data)) } }
+    func send(source: TerminalView, data: ArraySlice<UInt8>) { if editable && !replaying && !attaching { input(Data(data)) } }
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
     func setTerminalTitle(source: TerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
@@ -180,20 +192,27 @@ struct TerminalSurface: NSViewRepresentable {
     let editable: Bool
     let input: (Data) -> Void
     let resize: (TerminalSize) -> Void
+    var active = true
     func makeCoordinator() -> TerminalCoordinator { TerminalCoordinator(feed: feed, editable: editable, input: input, resize: resize) }
     func makeNSView(context: Context) -> TerminalContainer {
         let view = TerminalContainer(frame: .zero)
         view.observing = !editable
         context.coordinator.attach(view)
-        DispatchQueue.main.async { view.window?.makeFirstResponder(view.terminal) }
+        context.coordinator.active = active
+        if active { DispatchQueue.main.async { [weak coordinator = context.coordinator] in
+            if coordinator?.active == true { view.window?.makeFirstResponder(view.terminal) }
+        } }
         return view
     }
     func updateNSView(_ view: TerminalContainer, context: Context) {
-        let gainedControl = editable && !context.coordinator.editable
+        let gainedControl = active && (!context.coordinator.active || (editable && !context.coordinator.editable))
+        context.coordinator.active = active
         view.observing = !editable
         context.coordinator.editable = editable
         context.coordinator.input = input; context.coordinator.resize = resize
-        if gainedControl { DispatchQueue.main.async { view.window?.makeFirstResponder(view.terminal) } }
+        if gainedControl { DispatchQueue.main.async { [weak coordinator = context.coordinator] in
+            if coordinator?.active == true { view.window?.makeFirstResponder(view.terminal) }
+        } }
     }
     static func dismantleNSView(_ view: TerminalContainer, coordinator: TerminalCoordinator) { coordinator.detach() }
 }
@@ -203,6 +222,7 @@ struct TerminalSurface: UIViewRepresentable {
     let editable: Bool
     let input: (Data) -> Void
     let resize: (TerminalSize) -> Void
+    var active = true
     func makeCoordinator() -> TerminalCoordinator { TerminalCoordinator(feed: feed, editable: editable, input: input, resize: resize) }
     func makeUIView(context: Context) -> TerminalContainer {
         let view = TerminalContainer(frame: .zero)
@@ -213,5 +233,121 @@ struct TerminalSurface: UIViewRepresentable {
         if !editable && view.terminal.isFirstResponder { _ = view.terminal.resignFirstResponder() }
     }
     static func dismantleUIView(_ view: TerminalContainer, coordinator: TerminalCoordinator) { coordinator.detach() }
+}
+#endif
+
+#if os(macOS)
+struct HistoryRecordingStatus: View {
+    @ObservedObject var feed: TerminalFeed
+    var body: some View {
+        if let error = feed.historyError {
+            Label(L10n.text("No se está guardando el historial") + ": " + error, systemImage: "exclamationmark.triangle")
+                .font(.callout).foregroundStyle(.red).padding(8)
+        }
+    }
+}
+
+struct SavedTerminalHistory: View {
+    let active: Set<String>
+    @Environment(\.dismiss) private var dismiss
+    @State private var entries: [TerminalHistory.Entry] = []
+    @State private var selected: String?
+    @State private var error: String?
+    @State private var deleting: TerminalHistory.Entry?
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.text("Historial guardado")).font(.headline)
+                Spacer()
+                Button(L10n.text("Cerrar")) { dismiss() }
+            }.padding()
+            HSplitView {
+                List(selection: $selected) {
+                    ForEach(entries) { entry in
+                        VStack(alignment: .leading) {
+                            Text(entry.name)
+                            Text(entry.created.formatted()).font(.caption).foregroundStyle(.secondary)
+                        }.tag(entry.id)
+                    }
+                }.frame(minWidth: 200, idealWidth: 240)
+                if let entry = entries.first(where: { $0.id == selected }) {
+                    VStack {
+                        RecordedTerminal(entry: entry).id(entry.id)
+                        HStack {
+                            Text(L10n.text("Grabación local · no ejecuta comandos")).font(.caption)
+                            Spacer()
+                            Button(L10n.text("Eliminar historial…"), role: .destructive) { deleting = entry }
+                                .disabled(active.contains(entry.id))
+                        }.padding()
+                    }
+                } else {
+                    Text(L10n.text("Selecciona una sesión guardada")).frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            if let error { Text(error).foregroundStyle(.red).padding() }
+        }
+        .frame(minWidth: 850, minHeight: 600)
+        .onAppear { refresh() }
+        .confirmationDialog(L10n.text("¿Eliminar este historial definitivamente?"), isPresented: Binding(
+            get: { deleting != nil }, set: { if !$0 { deleting = nil } }
+        )) {
+            Button(L10n.text("Eliminar"), role: .destructive) {
+                guard let deleting, !active.contains(deleting.id) else { return }
+                do { try TerminalHistory.delete(deleting); self.deleting = nil; selected = nil; refresh() }
+                catch { self.error = error.localizedDescription }
+            }
+        }
+    }
+    private func refresh() {
+        do { entries = try TerminalHistory.entries(root: TerminalHistory.defaultDirectory) }
+        catch { self.error = error.localizedDescription }
+    }
+}
+
+private struct RecordedTerminal: View {
+    let entry: TerminalHistory.Entry
+    @StateObject private var feed = TerminalFeed()
+    @State private var position = 1.0
+    @State private var target = 1.0
+    @State private var length: UInt64 = 0
+    @State private var loading = false
+    @State private var error: String?
+    var body: some View {
+        VStack {
+            TerminalCanvas(feed: feed, editable: false, input: { _ in }, resize: { _ in })
+            HStack {
+                Button { seek(max(0, target - step)) } label: { Image(systemName: "backward.end") }
+                Slider(value: $position, in: 0...1) { editing in if !editing { target = position } }
+                    .accessibilityLabel(L10n.text("Posición en el historial"))
+                Button { seek(min(1, target + step)) } label: { Image(systemName: "forward.end") }
+                Text(position, format: .percent.precision(.fractionLength(0))).monospacedDigit()
+            }.padding(.horizontal)
+            Text(L10n.text("Usa la barra para recorrer toda la grabación; desplázate en la terminal para ver las líneas cercanas."))
+                .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+            if loading { ProgressView() }
+            if let error { Text(error).foregroundStyle(.red) }
+        }
+        .task(id: target) {
+            loading = true; error = nil
+            defer { loading = false }
+            _ = feed.reset([], sequence: 0)
+            do {
+                let reader = try TerminalHistory.Reader(entry)
+                length = reader.length
+                let stop = UInt64(Double(length) * target)
+                while reader.offset < stop {
+                    try Task.checkCancellation()
+                    for event in try reader.next(maxBytes: 8 * 1024) {
+                        if let size = event.size { feed.resize(size) }
+                        if let data = event.data { feed.append(data) }
+                    }
+                    // Yield between bounded batches so seeking a large recording remains cancellable.
+                    try await Task.sleep(for: .milliseconds(1))
+                }
+            } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        }
+    }
+    private var step: Double { length == 0 ? 1 : min(1, 8 * 1024 / Double(length)) }
+    private func seek(_ value: Double) { position = value; target = value }
 }
 #endif

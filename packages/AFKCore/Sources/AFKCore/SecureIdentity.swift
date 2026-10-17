@@ -3,15 +3,41 @@ import CryptoKit
 import NIOSSL
 import NIOCore
 import X509
+import Security
+import LocalAuthentication
 
 public struct DeviceIdentity: Codable {
     public let certificate: Data
-    private let privateKey: String
+    private let privateKey: String?
+    private let enclaveKey: Data?
+    public let requiresBiometry: Bool?
+    public var isHardwareBacked: Bool { enclaveKey != nil && privateKey == nil }
     public var fingerprint: String { Self.fingerprint(certificate) }
     static func fingerprint(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
-    public static func create(now: Date = Date()) throws -> Self {
+    // Software identities are retained for legacy decoding and explicit test fixtures only.
+    static func create(now: Date = Date()) throws -> Self {
         let key = P256.Signing.PrivateKey()
         let signingKey = Certificate.PrivateKey(key)
+        return try makeCertificate(signingKey, privateKey: key.pemRepresentation, enclaveKey: nil, biometry: false, now: now)
+    }
+    public static func createSecureEnclave(requireBiometry: Bool = false, context: LAContext = LAContext(), now: Date = Date()) throws -> Self {
+        guard SecureEnclave.isAvailable else { throw SecureError.hardwareUnavailable }
+        var error: Unmanaged<CFError>?
+        let flags: SecAccessControlCreateFlags = requireBiometry ? [.privateKeyUsage, .biometryCurrentSet] : [.privateKeyUsage]
+        guard let access = SecAccessControlCreateWithFlags(nil,
+            requireBiometry ? kSecAttrAccessibleWhenUnlockedThisDeviceOnly : kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            flags, &error) else { throw error!.takeRetainedValue() }
+        if requireBiometry {
+            var reason: NSError?
+            guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &reason) else { throw SecureError.biometryUnavailable }
+        }
+        context.localizedReason = L10n.text("Confirma tu identidad para autorizar el acceso a la terminal del Mac.")
+        context.localizedFallbackTitle = ""
+        context.touchIDAuthenticationAllowableReuseDuration = 0
+        let key = try SecureEnclave.P256.Signing.PrivateKey(accessControl: access, authenticationContext: context)
+        return try makeCertificate(Certificate.PrivateKey(key), privateKey: nil, enclaveKey: key.dataRepresentation, biometry: requireBiometry, now: now)
+    }
+    private static func makeCertificate(_ signingKey: Certificate.PrivateKey, privateKey: String?, enclaveKey: Data?, biometry: Bool, now: Date) throws -> Self {
         let name = try DistinguishedName { CommonName("AFK device") }
         let cert = try Certificate(version: .v3, serialNumber: .init(), publicKey: signingKey.publicKey,
             notValidBefore: now.addingTimeInterval(-300), notValidAfter: now.addingTimeInterval(5 * 365 * 86400),
@@ -19,11 +45,16 @@ public struct DeviceIdentity: Codable {
             extensions: Certificate.Extensions {}, issuerPrivateKey: signingKey)
         let pem = try cert.serializeAsPEM().pemString
         let der = try NIOSSLCertificate(bytes: Array(pem.utf8), format: .pem).toDERBytes()
-        return Self(certificate: Data(der), privateKey: key.pemRepresentation)
+        return Self(certificate: Data(der), privateKey: privateKey, enclaveKey: enclaveKey, requiresBiometry: biometry)
     }
-    func tlsConfiguration(server: Bool) throws -> TLSConfiguration {
+    func tlsConfiguration(server: Bool, authenticationContext: LAContext = LAContext()) throws -> TLSConfiguration {
         let cert = try NIOSSLCertificate(bytes: Array(certificate), format: .der)
-        let key = try NIOSSLPrivateKey(bytes: Array(privateKey.utf8), format: .pem)
+        let key: NIOSSLPrivateKey
+        if let enclaveKey, privateKey == nil {
+            key = NIOSSLPrivateKey(customPrivateKey: EnclaveTLSKey(blob: enclaveKey, context: authenticationContext))
+        } else if let privateKey, enclaveKey == nil {
+            key = try NIOSSLPrivateKey(bytes: Array(privateKey.utf8), format: .pem)
+        } else { throw SecureError.unauthorized }
         var c = server ? TLSConfiguration.makeServerConfiguration(certificateChain: [.certificate(cert)], privateKey: .privateKey(key)) : TLSConfiguration.makeClientConfiguration()
         c.certificateChain = [.certificate(cert)]; c.privateKey = .privateKey(key)
         c.minimumTLSVersion = .tlsv13; c.maximumTLSVersion = .tlsv13
@@ -60,9 +91,11 @@ public struct SecureInvitation: Codable {
 }
 
 public enum SecureError: Error, LocalizedError {
-    case obsoleteInvitation, invalidInvitation, unauthorized, persistence, protocolViolation, disconnected
+    case obsoleteInvitation, invalidInvitation, unauthorized, persistence, protocolViolation, disconnected, hardwareUnavailable, biometryUnavailable
     public var errorDescription: String? {
         switch self {
+        case .hardwareUnavailable: return L10n.text("Este dispositivo necesita Secure Enclave para crear una identidad protegida.")
+        case .biometryUnavailable: return L10n.text("Activa Face ID o Touch ID para entrar. Si cambias la biometría, vuelve a vincular el dispositivo.")
         case .obsoleteInvitation: return L10n.text("Actualiza ambas apps y genera una invitación nueva en el Mac.")
         case .invalidInvitation: return L10n.text("La invitación segura no es válida o venció. Crea otra en el Mac.")
         case .unauthorized: return L10n.text("No se pudo verificar la identidad del dispositivo.")
@@ -84,6 +117,8 @@ public struct TrustedDevice: Codable {
     public let id: String
     public let name: String
     public let certificate: Data
+    public var biometricIdentity: Bool? = nil
+    public var fullAccess: Bool? = nil
 }
 struct PendingInvitation: Codable {
     let id: String
@@ -108,7 +143,7 @@ public struct HostTrustState: Codable {
     private let save: (HostTrustState) throws -> Void
     public init(state: HostTrustState, save: @escaping (HostTrustState) throws -> Void, uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) { self.state = state; self.save = save; self.uptime = uptime }
     public convenience init(account: String) throws {
-        let state = try SecretStore.read(account) ?? HostTrustState(identity: DeviceIdentity.create())
+        let state = try SecretStore.read(account) ?? HostTrustState(identity: DeviceIdentity.createSecureEnclave())
         try SecretStore.write(state, account: account)
         self.init(state: state, save: { try SecretStore.write($0, account: account) })
         try cancelInvitation()
@@ -127,7 +162,7 @@ public struct HostTrustState: Codable {
     public func authorizeExisting(id: String, certificate: Data) throws {
         guard state.peers.contains(where: { $0.id == id && $0.certificate == certificate }) else { throw SecureError.unauthorized }
     }
-    public func reserve(id: String, name: String, certificate: Data, invitationID: String?, secret: String?, now: Date = Date()) throws -> UUID {
+    public func reserve(id: String, name: String, certificate: Data, invitationID: String?, secret: String?, biometricIdentity: Bool = false, now: Date = Date()) throws -> UUID {
         guard !enrollmentDisabled, var pending = state.pending, pending.expires > now,
               let deadline = invitationDeadline, uptime() < deadline,
               pending.attempts < 5, state.peers.count < 16 else { throw SecureError.unauthorized }
@@ -140,7 +175,7 @@ public struct HostTrustState: Codable {
               invitationID == pending.id, let secret, secret.count == 43,
               DeviceIdentity.fingerprint(Data(secret.utf8)) == pending.hash else { throw SecureError.unauthorized }
         let token = UUID()
-        reservation = (token, TrustedDevice(id: id, name: name, certificate: certificate), pending.id,
+        reservation = (token, TrustedDevice(id: id, name: name, certificate: certificate, biometricIdentity: biometricIdentity), pending.id,
                        min(deadline, uptime() + min(120, pending.expires.timeIntervalSince(now))))
         return token
     }
@@ -156,6 +191,23 @@ public struct HostTrustState: Codable {
         reservation = nil; invitationDeadline = nil
         var next = state; next.pending = nil
         do { try save(next); state = next } catch { enrollmentDisabled = true; throw error }
+    }
+    public func setFullAccess(_ id: String, enabled: Bool) throws {
+        guard let index = state.peers.firstIndex(where: { $0.id == id }),
+              !enabled || (state.identity.isHardwareBacked && state.peers[index].biometricIdentity == true) else { throw SecureError.unauthorized }
+        var next = state; next.peers[index].fullAccess = enabled
+        try save(next); state = next
+    }
+    public func clearFullAccess() throws {
+        var next = state
+        for i in next.peers.indices { next.peers[i].fullAccess = false }
+        try save(next); state = next
+    }
+    public func upgradeIdentity() throws {
+        guard !state.identity.isHardwareBacked else { return }
+        try cancelInvitation()
+        let next = try HostTrustState(identity: DeviceIdentity.createSecureEnclave())
+        try save(next); state = next
     }
     public func revokeAll() throws {
         try cancelInvitation()

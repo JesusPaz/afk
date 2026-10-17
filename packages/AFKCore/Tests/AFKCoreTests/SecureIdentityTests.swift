@@ -1,10 +1,76 @@
 import XCTest
 import NIOSSL
 import CoreImage
+import CryptoKit
 @testable import AFKCore
 
 @MainActor final class SecureIdentityTests: XCTestCase {
     private let host = HostIdentity(id: UUID().uuidString, code: "ABCDEFGH", name: "Mac")
+    func testHardwareIdentityAndPersistentTrust() throws {
+        guard SecureEnclave.isAvailable else { throw XCTSkip("Requires Secure Enclave hardware") }
+        let identity = try DeviceIdentity.createSecureEnclave()
+        XCTAssertTrue(identity.isHardwareBacked)
+        let bytes = try JSONEncoder().encode(identity)
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        XCTAssertNil(fields["privateKey"], "Never serialize a plaintext private key")
+        let restoredIdentity = try JSONDecoder().decode(DeviceIdentity.self, from: bytes)
+        XCTAssertEqual(identity.fingerprint, restoredIdentity.fingerprint)
+        _ = try NIOSSLContext(configuration: restoredIdentity.tlsConfiguration(server: true))
+        var persisted: HostTrustState?
+        var fail = false
+        let store = HostTrustStore(state: HostTrustState(identity: identity), save: {
+            if fail { throw SecureError.persistence }; persisted = $0
+        })
+        let invite = try store.invitation(server: "https://example.com", host: host)
+        let phone = try DeviceIdentity.create(), id = UUID().uuidString
+        let reservation = try store.reserve(id: id, name: "Phone", certificate: phone.certificate,
+            invitationID: invite.id, secret: invite.secret, biometricIdentity: true)
+        try store.confirm(reservation)
+        XCTAssertNotEqual(store.state.peers[0].fullAccess, true)
+        try store.setFullAccess(id, enabled: true)
+        let restored = HostTrustStore(state: try JSONDecoder().decode(HostTrustState.self, from: JSONEncoder().encode(XCTUnwrap(persisted))), save: { _ in })
+        XCTAssertEqual(restored.state.peers[0].fullAccess, true)
+        XCTAssertThrowsError(try restored.authorizeExisting(id: id, certificate: DeviceIdentity.create().certificate))
+        fail = true
+        XCTAssertThrowsError(try store.setFullAccess(id, enabled: false))
+        XCTAssertEqual(store.state.peers[0].fullAccess, true, "Failed persistence must not report revocation success")
+        fail = false
+        try store.clearFullAccess()
+        XCTAssertEqual(persisted?.peers[0].fullAccess, false)
+        try store.revoke(id)
+        XCTAssertTrue(store.state.peers.isEmpty)
+        let legacyInvite = try store.invitation(server: "https://example.com", host: host)
+        let legacyID = UUID().uuidString
+        let legacyReservation = try store.reserve(id: legacyID, name: "Legacy", certificate: phone.certificate,
+            invitationID: legacyInvite.id, secret: legacyInvite.secret)
+        try store.confirm(legacyReservation)
+        XCTAssertThrowsError(try store.setFullAccess(legacyID, enabled: true))
+    }
+    func testExplicitHardwareUpgradeRemovesPreviousPins() throws {
+        guard SecureEnclave.isAvailable else { throw XCTSkip("Requires Secure Enclave hardware") }
+        let oldIdentity = try DeviceIdentity.create()
+        var state = HostTrustState(identity: oldIdentity)
+        state.peers = [TrustedDevice(id: UUID().uuidString, name: "Old", certificate: try DeviceIdentity.create().certificate)]
+        var fail = true
+        let store = HostTrustStore(state: state, save: { _ in if fail { throw SecureError.persistence } })
+        XCTAssertThrowsError(try store.upgradeIdentity())
+        XCTAssertEqual(store.state.identity.fingerprint, oldIdentity.fingerprint)
+        XCTAssertEqual(store.state.peers.count, 1)
+        fail = false
+        try store.upgradeIdentity()
+        XCTAssertTrue(store.state.identity.isHardwareBacked)
+        XCTAssertNotEqual(store.state.identity.fingerprint, oldIdentity.fingerprint)
+        XCTAssertTrue(store.state.peers.isEmpty)
+    }
+    func testLegacyIdentityCannotGainPersistentFullAccess() throws {
+        let store = HostTrustStore(state: HostTrustState(identity: try DeviceIdentity.create()), save: { _ in })
+        let invite = try store.invitation(server: "https://example.com", host: host)
+        let reservation = try store.reserve(id: UUID().uuidString, name: "Old phone", certificate: DeviceIdentity.create().certificate,
+            invitationID: invite.id, secret: invite.secret)
+        try store.confirm(reservation)
+        XCTAssertThrowsError(try store.setFullAccess(store.state.peers[0].id, enabled: true))
+        XCTAssertNotEqual(store.state.peers[0].fullAccess, true)
+    }
     func testIdentitySurvivesSerialization() throws {
         let identity = try DeviceIdentity.create()
         let restored = try JSONDecoder().decode(DeviceIdentity.self, from: JSONEncoder().encode(identity))

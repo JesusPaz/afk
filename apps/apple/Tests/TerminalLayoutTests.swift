@@ -4,6 +4,39 @@ import XCTest
 import AFKCore
 
 final class TerminalLayoutTests: XCTestCase {
+    @MainActor func testReattachAfterReplayOverflowRestoresAlternateScreenWithoutSendingInput() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let history = try TerminalHistory(root: root, name: "Codex regression")
+        let feed = TerminalFeed(history: history)
+        let first = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 900, height: 600))
+        var inputs: [Data] = []
+        let coordinator = TerminalCoordinator(feed: feed, editable: true, input: { inputs.append($0) }, resize: { _ in })
+        coordinator.attach(first)
+        feed.resize(TerminalSize(columns: 110, rows: 36))
+        for _ in 0..<40 { feed.append(Data(String(repeating: "background output\r\n", count: 500).utf8)) }
+        XCTAssertNil(feed.snapshot, "Reproduce the old 256 KiB replay failure")
+        feed.append(Data("\u{1b}[?1049h\u{1b}[2J\u{1b}[3;5HCodex still running\u{1b}[6n".utf8))
+        let terminal = first.terminal.getTerminal()
+        let before = (0..<36).map { terminal.getLine(row: $0)?.translateToString() }
+        let cursor = terminal.getCursorLocation()
+        coordinator.detach()
+        inputs.removeAll()
+        // Recreate the native view, as switching sessions used to do (also covers reopening the window).
+        let restored = TerminalContainer(frame: first.frame)
+        let replacement = TerminalCoordinator(feed: feed, editable: true, input: { inputs.append($0) }, resize: { _ in })
+        replacement.attach(restored)
+        defer { replacement.detach() }
+        let actual = restored.terminal.getTerminal()
+        XCTAssertEqual(actual.cols, 110); XCTAssertEqual(actual.rows, 36)
+        XCTAssertEqual((0..<36).map { actual.getLine(row: $0)?.translateToString() }, before)
+        XCTAssertEqual(actual.getCursorLocation().x, cursor.x)
+        XCTAssertEqual(actual.getCursorLocation().y, cursor.y)
+        XCTAssertTrue(inputs.isEmpty, "Restoration must not send historical terminal queries to the live shell")
+        feed.append(Data(" live".utf8))
+        XCTAssertTrue(actual.getLine(row: 2)?.translateToString().contains("Codex still running live") == true)
+    }
     @MainActor func testSharedPanelPreview() throws {
         guard let path = ProcessInfo.processInfo.environment["AFK_PANEL_PREVIEW"] else { return }
         _ = NSApplication.shared

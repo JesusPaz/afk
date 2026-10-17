@@ -10,7 +10,7 @@ import Security
         let host = HostController(preferences: UserDefaults(suiteName: "AFK-secure-tests")!)
         let credentials = try HostSecret(id: ProcessInfo.processInfo.environment["AFK_E2EE_HOST_ID"] ?? UUID().uuidString, token: SecretStore.randomToken())
         let account = "secure-test-\(UUID().uuidString)"
-        let phone = SecurePhoneRelay(account: account)
+        let phone = SecurePhoneRelay(account: account, persist: { try SecretStore.write($0, account: account) }, makeIdentity: { _ in try DeviceIdentity.createSecureEnclave() })
         var testAccounts = [account, "host-trust-v2:\(try canonicalServer(server)):\(credentials.id)"]
         defer {
             phone.disconnect(); host.shutdown()
@@ -122,7 +122,7 @@ import Security
         XCTAssertEqual(dictationPackets, beforeLostInput + 2)
         // A second device cannot reuse the consumed invitation.
         let intruderAccount = "secure-test-\(UUID().uuidString)"; testAccounts.append(intruderAccount)
-        let intruder = SecurePhoneRelay(account: intruderAccount)
+        let intruder = SecurePhoneRelay(account: intruderAccount, persist: { try SecretStore.write($0, account: intruderAccount) })
         defer { intruder.disconnect() }
         var intruderAuthorized = false
         intruder.onMessage = { if $0.type == "welcome" { intruderAuthorized = true } }
@@ -131,7 +131,7 @@ import Security
         XCTAssertFalse(intruderAuthorized); XCTAssertEqual(host.relay.clients.count, 1)
         await host.makePairing()
         let secondAccount = "secure-test-\(UUID().uuidString)"; testAccounts.append(secondAccount)
-        let second = SecurePhoneRelay(account: secondAccount)
+        let second = SecurePhoneRelay(account: secondAccount, persist: { try SecretStore.write($0, account: secondAccount) })
         defer { second.disconnect() }
         var secondMessages: [Message] = []
         second.onMessage = { secondMessages.append($0) }
@@ -171,6 +171,33 @@ import Security
         try await until { host.connectedClients.contains(secondSaved.credentials.clientID) }
         await host.revoke(secondSaved.credentials.clientID)
         phone.disconnect(); received = []
+        try await until { !host.connectedClients.contains(saved.credentials.clientID) }
+        // A pinned certificate without its exact enclave key cannot authenticate.
+        var fields = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(saved.identity)) as? [String: Any])
+        let otherKey = try DeviceIdentity.createSecureEnclave()
+        let otherFields = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(otherKey)) as? [String: Any])
+        fields["enclaveKey"] = otherFields["enclaveKey"]
+        let substituted = try JSONDecoder().decode(DeviceIdentity.self, from: JSONSerialization.data(withJSONObject: fields))
+        let impostor = SecureTransport()
+        var impostorAuthorized = false, impostorClosed = false
+        let impostorNonce = try SecretStore.randomToken()
+        impostor.onReady = { _ in
+            // The client can finish verifying the server before the server rejects its proof.
+            var hello = SecurePacket(type: "hello")
+            hello.server = saved.server; hello.hostID = saved.credentials.host.id
+            hello.clientID = saved.credentials.clientID; hello.nonce = impostorNonce
+            impostor.send(hello)
+        }
+        impostor.onPacket = { if $0.type == "welcome" { impostorAuthorized = true } }
+        impostor.onClose = { impostorClosed = true }
+        do {
+            try await impostor.connect(base: URL(string: server)!, path: "v2/connect", token: saved.credentials.token,
+                identity: substituted, server: false, accepts: { DeviceIdentity.fingerprint($0) == saved.hostFingerprint })
+        } catch { impostorClosed = true }
+        try await until { impostorClosed }
+        XCTAssertFalse(impostorAuthorized)
+        XCTAssertFalse(host.connectedClients.contains(saved.credentials.clientID))
+        impostor.close()
         _ = try phone.restore(); phone.connect()
         try await until { received.contains { $0.type == "welcome" } }
         await host.revoke(saved.credentials.clientID)
@@ -222,7 +249,7 @@ import Security
         let candidate = try XCTUnwrap(host.relay.candidate)
         XCTAssertEqual(phone.saved?.credentials.clientID, first.credentials.clientID)
         let otherAccount = "secure-test-\(UUID().uuidString)"; accounts.append(otherAccount)
-        let other = SecurePhoneRelay(account: otherAccount)
+        let other = SecurePhoneRelay(account: otherAccount, persist: { try SecretStore.write($0, account: otherAccount) })
         defer { other.disconnect() }
         do { _ = try await other.pair(invitation: invitation); XCTFail("Second candidate replaced first") } catch {}
         XCTAssertEqual(host.relay.candidate?.id, candidate.id)
