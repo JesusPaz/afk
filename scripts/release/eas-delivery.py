@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import tempfile
 import urllib.request
@@ -82,7 +83,9 @@ def main():
             if not url.startswith('https://'):
                 raise ValueError('Expected HTTPS artifact download')
             bundle = root / 'mac.tar.gz'
-            urllib.request.urlretrieve(url, bundle)
+            request = urllib.request.Request(url, headers={'User-Agent': 'AFK-Release/1.0'})
+            with urllib.request.urlopen(request, timeout=60) as response, bundle.open('wb') as output:
+                shutil.copyfileobj(response, output)
             extract_assets(bundle, Path('dist'), tag)
             subprocess.run(['shasum', '-a', '256', '-c', 'SHA256SUMS'], cwd='dist', check=True)
         summary = os.environ.get('GITHUB_STEP_SUMMARY')
