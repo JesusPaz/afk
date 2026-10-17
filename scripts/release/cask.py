@@ -19,11 +19,11 @@ Path(destination).write_text(f'''cask "{token}" do
 
   url "https://github.com/JesusPaz/afk/releases/download/v#{{version}}/AFK-v#{{version}}-macOS{extension}"
   name "AFK"
-  desc "Share your Mac terminal with your iPhone"
+  desc "Share terminal sessions with your phone"
   homepage "https://github.com/JesusPaz/afk"
 
   conflicts_with cask: "{conflict}"
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "AFK.app"
 end
