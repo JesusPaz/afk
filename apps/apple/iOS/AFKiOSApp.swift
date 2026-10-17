@@ -197,7 +197,6 @@ struct PhoneTerminal: View {
     let session: SessionInfo
     let title: String
     @State private var confirmEnd = false
-    @State private var showingHistory = false
     private var running: Bool { model.sessions.first(where: { $0.id == session.id })?.running ?? false }
     var body: some View {
         VStack(spacing: 0) {
@@ -205,8 +204,7 @@ struct PhoneTerminal: View {
                 Label(model.terminalStatus, systemImage: model.canWrite ? "keyboard" : "eye")
                     .font(.subheadline.weight(.medium))
                 if let notice = model.sessionNotice { InlineNotice(text: notice) }
-                if let progress = model.historyProgress { ProgressView(value: progress) }
-                HistoryRecordingStatus(feed: model.feed)
+                if model.loadingHistory { ProgressView() }
                 if let expiry = model.selectedInfo?.controlExpiresAt {
                     Text(L10n.text("Control autorizado hasta") + " " + expiry.formatted(date: .omitted, time: .shortened)).font(.caption)
                 } else if model.ready { Text(L10n.text("Solo lectura. Autoriza el control desde el Mac.")).font(.caption) }
@@ -239,22 +237,11 @@ struct PhoneTerminal: View {
         .confirmationDialog(L10n.text("¿Terminar esta sesión?"), isPresented: $confirmEnd) {
             Button(L10n.text("Terminar sesión"), role: .destructive) { model.terminate() }
         }
-        .sheet(isPresented: $showingHistory) {
-            NavigationStack {
-                if let entry = model.feed.history?.entry {
-                    RecordedTerminal(entry: entry)
-                        .navigationTitle(L10n.text("Historial completo"))
-                        .toolbar { Button(L10n.text("Cerrar")) { showingHistory = false } }
-                }
-            }
-        }
         .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
         .onAppear { model.attach(session.id) }.onDisappear { model.leave() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button(L10n.text("Historial completo"), systemImage: "clock") { showingHistory = true }
-                        .disabled(!model.ready || model.feed.history == nil)
                     Button(L10n.text("Reconectar"), systemImage: "arrow.clockwise") { model.reconnect() }
                     Button(L10n.text("Terminar sesión"), role: .destructive) { confirmEnd = true }.disabled(!model.canTerminate)
                 } label: { Label(L10n.text("Opciones de sesión"), systemImage: "ellipsis.circle") }

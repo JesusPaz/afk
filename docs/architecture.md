@@ -12,7 +12,25 @@ The Mac owns shell processes, byte ordering, terminal dimensions, replay buffers
 
 A lease contains owner, epoch and last accepted input sequence. Taking control increments the epoch. The host accepts input only from that owner, matching that epoch, with an increasing sequence. Both local and remote input pass through this check on the main actor. Remote leases expire after 30 seconds without renewal/input; iPhone renews every 10 seconds. Disconnect releases control. A separate Mac-owned permission layer grants session visibility and temporary control per device; lists and all outgoing session events are filtered. Its five-minute inactivity deadline counts only accepted input after first claim, and cannot be extended by lease renewals or reconnects. Grants are process-local and are cleared on stop/restart; a bounded local event history persists. Taking control is explicit and preempts the previous writer in this POC.
 
-The process stays on the Mac when the network fails. Client output sequence gaps force a new snapshot. Snapshots replay the complete stream of ANSI bytes and ordered geometry changes from process creation; truncating arbitrary ANSI bytes cannot restore a terminal correctly. Updated phones request the disk recording one bounded chunk at a time, acknowledging its file offset before the next read. The host suppresses live output to that phone/session while downloading, refreshes the file length on each request and atomically resumes live events at the final chunk’s output sequence. Each page is authorized again, and transfer IDs reject stale responses after reattachment. Legacy snapshot clients still fail at their replay cap. The Mac app keeps live native renderers across session selection and separately journals ANSI/resize events to owner-only local files. Local reattachment can restore from that journal after network replay overflows. Saved recordings persist until explicitly deleted and are browsed in bounded batches; live renderers retain 10,000 scrollback lines. Production needs authoritative terminal-state snapshots and bounded scrollback.
+The process stays on the Mac when the network fails. The Mac parses output and
+ordered geometry changes with a bounded SwiftTerm emulator. Updated phones receive
+its current rendered screen, cursor and keyboard modes, so attaching does not replay
+old ANSI bytes or depend on the history length. Screen updates coalesce behind one
+acknowledged transfer per phone, with bounded packets; intermediate visual updates
+may be skipped, while every original output event remains in the Mac recording.
+
+Rows entering normal scrollback are appended to owner-only row/index files. Scrolling
+near either edge requests up to 64 rows / 64 KiB from disk; the phone keeps a maximum
+of 256 historical rows and restores the visible row's absolute position after loading.
+While reading history, live screen state continues updating separately. Resize archives
+newly hidden visible text without re-reading the full recording. Archived rows retain
+their historical width rather than reflowing all past output on every resize.
+
+Legacy phones still receive bounded full-stream snapshots. The Mac native UI and saved
+recording browser retain the original ANSI/geometry journal and their existing behavior.
+The paginated phone view renders text, cell colors/styles and cursor/keyboard state;
+terminal image protocols and mouse interaction within applications are not transported
+by this rendered-state protocol. The original recording is preserved.
 
 ## Storage
 
@@ -32,4 +50,4 @@ The initial migration is embedded and applied in a PostgreSQL advisory-locked tr
 
 ## Efficiency
 
-One shared Swift package for protocol/networking and one for host responsibilities. Terminal rendering uses SwiftTerm rather than implementing a terminal parser. Go uses an 8-connection database pool and retains live routing in memory. HTTP bodies are capped at 8 KiB, WebSocket messages at 64 KiB, decrypted application packets at 512 KiB, outbound queues at 16 messages, input at 8 KiB and legacy in-memory replay at 256 KiB per session. Disk history transfers use 32 KiB read batches (plus at most one record) and one outstanding request per phone. Slow peers are disconnected rather than accumulating unbounded output. These are developer limits, not benchmark results. One relay instance only; no cross-node fanout yet.
+One shared Swift package for protocol/networking and one for host responsibilities. Terminal rendering uses SwiftTerm rather than implementing a terminal parser. Go uses an 8-connection database pool and retains live routing in memory. HTTP bodies are capped at 8 KiB, WebSocket messages at 64 KiB, decrypted application packets at 512 KiB, outbound queues at 16 messages, input at 8 KiB and legacy in-memory replay at 256 KiB per session. Screen frames are capped at 8 MiB and transferred in acknowledged 24 KiB binary parts, paced by 20 ms acknowledgements. History pages are capped at 64 rows and 64 KiB, with one outstanding request per phone, paced at 100 ms. Slow peers are disconnected rather than accumulating unbounded output. These are developer limits, not benchmark results. One relay instance only; no cross-node fanout yet.

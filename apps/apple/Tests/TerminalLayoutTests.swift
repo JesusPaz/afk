@@ -4,6 +4,37 @@ import XCTest
 import AFKCore
 
 final class TerminalLayoutTests: XCTestCase {
+    @MainActor func testPrependingHistoryPreservesVisibleRowWhileOutputContinues() throws {
+        _ = NSApplication.shared
+        let feed = TerminalFeed()
+        let history = RemoteScrollback(feed: feed)
+        let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let coordinator = TerminalCoordinator(feed: feed, editable: false, input: { _ in }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        var viewport = TerminalViewport(size: .initial, rows: (0..<24).map { TerminalRow(ansi: "live \($0)", columns: 80) },
+            cursorX: 0, cursorY: 0, cursorVisible: true, applicationCursor: false, bracketedPaste: false,
+            keyboardFlags: 0, historyCount: 1000, sequence: 1)
+        history.update(viewport)
+        func olderPage() throws {
+            let request = try XCTUnwrap(history.request(older: true))
+            let end = try XCTUnwrap(request.historyBefore)
+            var page = Message("historyPage"); page.requestID = request.requestID
+            page.historyStart = end - 64; page.historyBefore = end
+            page.historyRows = ((end - 64)..<end).map { TerminalRow(ansi: "old \($0)", columns: 80) }
+            XCTAssertTrue(history.accept(page))
+        }
+        try olderPage()
+        container.terminal.scrollTo(row: 10)
+        let before = container.terminal.getTerminal().getLine(row: 0)?.translateToString()
+        try olderPage()
+        XCTAssertEqual(container.terminal.getTerminal().getLine(row: 0)?.translateToString(), before)
+        XCTAssertEqual(container.terminal.getTerminal().buffer.yDisp, 74)
+        viewport.historyCount += 100; viewport.sequence += 1
+        history.update(viewport)
+        XCTAssertEqual(container.terminal.getTerminal().getLine(row: 0)?.translateToString(), before)
+    }
+
     @MainActor func testReattachAfterReplayOverflowRestoresAlternateScreenWithoutSendingInput() throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

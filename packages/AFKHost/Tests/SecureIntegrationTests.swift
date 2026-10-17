@@ -153,56 +153,53 @@ import Security
         second.send(resize)
         try await until { session.feed.size.columns == 91 }
         XCTAssertFalse(secondMessages.contains { $0.data.flatMap { Data(base64Encoded: $0) }.map { String(decoding: $0, as: UTF8.self).contains("FORBIDDEN_STALE_OWNER") } ?? false })
-        // A history larger than the former cap crosses the actual encrypted transport.
+        // Opening a long session transfers only its current state, not its full recording.
         let block = Data(repeating: 65, count: 32 * 1024)
         for _ in 0..<40 { session.feed.sequence += 1; session.feed.append(block) }
         XCTAssertNil(session.feed.snapshot)
         let transferID = UUID().uuidString
-        var chunks: [Message] = []
-        var downloaded: [TerminalEvent] = []
+        var frameData = Data(), frameSequence: UInt64?, snapshots: [TerminalViewport] = []
+        var pages: [Message] = []
         phone.onMessage = { message in
             received.append(message)
-            guard message.type == "historyChunk", message.historyID == transferID else { return }
-            chunks.append(message); downloaded.append(contentsOf: message.events ?? [])
-            XCTAssertLessThan((try? JSONEncoder().encode(message).count) ?? Int.max, 64 * 1024)
-            if chunks.count == 1 {
-                session.feed.sequence += 1; session.feed.resize(TerminalSize(columns: 110, rows: 35))
-                session.feed.sequence += 1; session.feed.append(Data("output during download".utf8))
+            if message.type == "historyPage" { pages.append(message) }
+            guard message.type == "viewport", message.viewportID == transferID else { return }
+            if frameSequence != message.sequence { frameSequence = message.sequence; frameData = Data() }
+            frameData.append(Data(base64Encoded: message.data ?? "") ?? Data())
+            if message.historyComplete == true, let view = try? JSONDecoder().decode(TerminalViewport.self, from: frameData) {
+                snapshots.append(view)
             }
-            if message.historyComplete != true {
-                var next = Message("historyNext", sessionID: session.id)
-                next.historyID = transferID; next.historyOffset = message.historyOffset
-                phone.send(next)
-            }
+            var next = Message("viewportNext", sessionID: session.id)
+            next.viewportID = transferID; next.historyOffset = message.historyOffset; next.sequence = message.sequence
+            phone.send(next)
         }
-        var attach = Message("attach", sessionID: session.id); attach.historyID = transferID
+        var attach = Message("attach", sessionID: session.id); attach.viewportID = transferID
         phone.send(attach)
-        try await until { chunks.last?.historyComplete == true }
-        let reader = try TerminalHistory.Reader(XCTUnwrap(session.feed.history).entry)
-        var recorded: [TerminalEvent] = []
-        while reader.offset < reader.length { recorded.append(contentsOf: try reader.next()) }
-        XCTAssertEqual(downloaded, recorded)
-        XCTAssertGreaterThan(chunks.count, 40)
-        XCTAssertEqual(chunks.last?.sequence, session.feed.sequence)
-        phone.onMessage = { received.append($0) }
-
-        // Stop a second transfer mid-download, then revoke access before its next page.
-        received = []
-        attach.historyID = UUID().uuidString
-        phone.send(attach)
-        try await until { received.contains { $0.type == "historyChunk" } }
-        let firstPage = try XCTUnwrap(received.first { $0.type == "historyChunk" })
+        try await until { !snapshots.isEmpty }
+        XCTAssertLessThan(frameData.count, 16 * 1024)
+        XCTAssertTrue(pages.isEmpty, "Opening must not eagerly fetch history")
+        let view = try XCTUnwrap(snapshots.last)
+        XCTAssertGreaterThan(view.historyCount, 10_000)
+        var pageRequest = Message("historyPage", sessionID: session.id)
+        pageRequest.viewportID = transferID; pageRequest.requestID = UUID().uuidString
+        pageRequest.historyBefore = view.historyCount
+        phone.send(pageRequest)
+        try await until { !pages.isEmpty }
+        let firstPage = try XCTUnwrap(pages.last)
+        XCTAssertLessThanOrEqual(firstPage.historyRows?.count ?? 0, 64)
+        XCTAssertEqual(firstPage.historyBefore, view.historyCount)
         // Removing read access immediately stops future output and further history pages.
         received = []
         host.setAccess(client: saved.credentials.clientID, session: session.id, level: .none)
         try await until { received.contains { $0.type == "sessions" && $0.sessions?.isEmpty == true } }
         // Earlier frames can already be in flight; the ordered permission update is the boundary.
         received = []
-        var forbiddenPage = Message("historyNext", sessionID: session.id)
-        forbiddenPage.historyID = attach.historyID; forbiddenPage.historyOffset = firstPage.historyOffset
+        var forbiddenPage = Message("historyPage", sessionID: session.id)
+        forbiddenPage.viewportID = transferID; forbiddenPage.requestID = UUID().uuidString
+        forbiddenPage.historyBefore = firstPage.historyStart
         phone.send(forbiddenPage)
         try await until { received.contains { $0.type == "error" } }
-        XCTAssertFalse(received.contains { $0.type == "historyChunk" })
+        XCTAssertFalse(received.contains { $0.type == "historyPage" })
         var afterRemoval = Message("input", sessionID: session.id)
         afterRemoval.epoch = session.lease.epoch; afterRemoval.sequence = 2
         afterRemoval.data = Data("printf POST_REMOVAL_MARKER\n".utf8).base64EncodedString()
@@ -263,7 +260,7 @@ import Security
     }
     func testHistoryRequestRejectedWhilePending() async throws {
         try await withTestHost { host, _ in
-            try await rejectedPendingCommands(host: host, commands: ["historyNext"])
+            try await rejectedPendingCommands(host: host, commands: ["viewportNext", "historyPage"])
         }
     }
     private func withTestHost(_ operation: (HostController, inout [String]) async throws -> Void) async throws {

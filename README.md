@@ -71,7 +71,7 @@ The unsigned commands above are compile checks. To **run** the iPhone simulator 
 ## Current boundaries
 
 - Up to eight sessions and eight connected clients per Mac; iPhone remembers one Mac.
-- The current controller determines the shared terminal size: Mac window or iPhone viewport (including rotation and keyboard). Observers retain that grid and can scroll when it is larger than their screen. Updated iPhones retrieve the full disk recording in bounded, acknowledged chunks, then continue with live output. There is no total history size cap; loading time and available disk space depend on the recording. Older iPhones still use the 256 KiB snapshot protocol and must be updated for long sessions.
+- The current controller determines the shared terminal size: Mac window or iPhone viewport (including rotation and keyboard). Observers retain that grid and can scroll when it is larger than their screen. Updated iPhones open the current screen immediately and fetch older history automatically when scrolling backward. The Mac keeps the complete recording on disk. Older iPhones still use the 256 KiB snapshot protocol; update both apps for long sessions.
 - Sessions survive closing the Mac window, **not quitting AFK, reboot or sleep with an active network connection**. There is no separate background helper yet.
 - Manual reconnect. No offline keystroke queue or automatic retries of input.
 - SwiftUI screens implement the functional flows; final visual polish and accessibility/device validation remain.
@@ -104,19 +104,24 @@ end the session first. Existing sessions from an older app cannot recover output
 already discarded before this feature was installed.
 
 Switching sessions keeps each live renderer attached, including its alternate screen
-and background updates. Live terminals retain 10,000 scrollback lines in RAM.
+and background updates. The live Mac terminal retains 10,000 scrollback lines in RAM.
 **Saved history** provides a recording-position slider and previous/next controls to
 browse the complete disk recording in bounded batches, including earlier output
 outside live scrollback. Opening a recording of an active session captures its current
 length; reopen it to refresh. Reopening a live window reconstructs the renderer from
 the recording, which can take time for long sessions.
 
-On iPhone, **Session options → Full history** opens the complete downloaded recording
-with the same position controls. The phone keeps a temporary owner-only disk copy
-while viewing the session, removed on leaving, disconnecting or backgrounding.
-Reopen the history viewer to include newly received output. Long sessions must finish
-loading before input is enabled; both apps need this update. The Mac remains the
-authoritative recording, including if a download fails.
+On iPhone, scroll backward in the terminal to load older rows automatically. There is
+no separate history menu and opening a session does not download its full recording.
+Pages contain at most 64 rows / 64 KiB; the phone retains at most 256 historical rows
+plus the current screen. Scrolling forward fetches newer pages and returns to live
+output. New output does not move the row being read. Choosing **Write from here**
+returns to the current screen before enabling input. Both apps need this update.
+
+The Mac builds an owner-only, disk-indexed row archive alongside its original ANSI
+recording. Rows retain their rendered text and colors at the width where they entered
+history; the raw recording remains available in Mac **Saved history**, including
+terminal redraws. The iPhone uses bounded memory rather than a complete disk copy.
 
 The recording files are owner-only (directories `0700`, files `0600`), contain terminal
 output that may include secrets, and are not separately encrypted by AFK. They never

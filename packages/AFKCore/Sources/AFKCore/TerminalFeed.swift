@@ -35,16 +35,25 @@ public struct TerminalReplay {
 
 @MainActor
 public final class TerminalFeed: ObservableObject {
+    private var presentation: [TerminalEvent]?
+    public private(set) var presentationStart: UInt64?
+    public private(set) var followingPresentation = true
+    public var onHistoryEdge: ((Bool) -> Void)?
+    public func present(_ events: [TerminalEvent], sequence: UInt64, start: UInt64, following: Bool) {
+        presentation = events; presentationStart = start; followingPresentation = following
+        self.sequence = sequence; size = events.compactMap(\.size).last ?? .initial
+        for listener in listeners.values { listener(events, true) }
+    }
+    public func clearPresentation() {
+        presentation = nil; presentationStart = nil; followingPresentation = true
+        _ = reset([], sequence: 0)
+    }
     private var replay = TerminalReplay()
     private var listeners: [UUID: ([TerminalEvent], Bool) -> Void] = [:]
     @Published public private(set) var size = TerminalSize.initial
     public var sequence: UInt64 = 0
     public var snapshot: [TerminalEvent]? { replay.snapshot }
-    public private(set) var history: TerminalHistory?
-    public func replaceHistory(_ history: TerminalHistory?) {
-        self.history = history; historyError = nil
-        _ = reset([], sequence: 0)
-    }
+    public let history: TerminalHistory?
     @Published public private(set) var historyError: String?
     public init(history: TerminalHistory? = nil) { self.history = history }
     public func synchronizeHistory() {
@@ -72,7 +81,8 @@ public final class TerminalFeed: ObservableObject {
     }
     public func observe(replayHistory: Bool = false, _ callback: @escaping ([TerminalEvent], Bool) -> Void) -> UUID {
         let id = UUID(); listeners[id] = callback
-        if replayHistory, let history {
+        if let presentation { callback(presentation, true) }
+        else if replayHistory, let history {
             callback([], true)
             do {
                 let reader = try TerminalHistory.Reader(history.entry)

@@ -14,6 +14,8 @@ public final class HostSession: ObservableObject, Identifiable {
     @Published public private(set) var lease = ControlLease()
     public var onEvent: ((Message) -> Void)?
     public var onState: (() -> Void)?
+    let screen: TerminalScreen?
+    private let temporaryScreenDirectory: URL?
     private let process = PTYProcess()
     private var pendingOutput = Data()
     private var outputTask: Task<Void, Never>?
@@ -26,9 +28,25 @@ public final class HostSession: ObservableObject, Identifiable {
 
     public init(id: String = UUID().uuidString, name: String = "Shell", history: TerminalHistory? = nil) {
         self.id = id; self.name = name; feed = TerminalFeed(history: history)
+        let directory = history?.entry.directory ?? FileManager.default.temporaryDirectory.appendingPathComponent("AFK-screen-" + UUID().uuidString)
+        temporaryScreenDirectory = history == nil ? directory : nil
+        screen = try? TerminalScreen(directory: directory)
+        _ = feed.observe { [weak screen] events, _ in
+            for event in events {
+                if let data = event.data { screen?.append(data) }
+                if let size = event.size { screen?.resize(size) }
+            }
+        }
+        screen?.response = { [weak self] bytes in
+            guard let self, self.lease.owner != "local", !self.lease.owner.isEmpty else { return }
+            var reply = Message("terminalResponse", sessionID: self.id)
+            reply.data = bytes.base64EncodedString(); reply.owner = self.lease.owner; reply.epoch = self.lease.epoch
+            self.onEvent?(reply)
+        }
         process.onData = { [weak self] in self?.received($0) }
         process.onExit = { [weak self] in self?.exited($0) }
     }
+    deinit { if let temporaryScreenDirectory { try? FileManager.default.removeItem(at: temporaryScreenDirectory) } }
     public func start() {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("AFK_") && $0.key != "DATABASE_URL" }

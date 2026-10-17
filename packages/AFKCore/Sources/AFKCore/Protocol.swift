@@ -22,7 +22,11 @@ public struct Message: Codable {
     public var sequence: UInt64?
     public var data: String?
     public var events: [TerminalEvent]?
-    public var historyID: String?
+    public var viewportID: String?
+    public var historyRows: [TerminalRow]?
+    public var historyStart: UInt64?
+    public var historyBefore: UInt64?
+    public var requestID: String?
     public var historyOffset: UInt64?
     public var historyLength: UInt64?
     public var historyComplete: Bool?

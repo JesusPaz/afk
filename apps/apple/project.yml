@@ -54,6 +54,18 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: AFK
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+  AFKiOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Shared, Tests, iOS/RemoteModel.swift]
+    dependencies:
+      - package: AFK
+        product: AFKCore
+      - package: SwiftTerm
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jesuspaz.afk.ios.tests
+        INFOPLIST_FILE: ''
 schemes:
   AFKMac:
     build:
@@ -63,3 +75,5 @@ schemes:
     build:
       targets:
         AFKiOS: all
+    test:
+      targets: [AFKiOSTests]

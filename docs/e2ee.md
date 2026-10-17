@@ -189,24 +189,39 @@ Apple references: [Secure Enclave keys](https://developer.apple.com/documentatio
 [current biometric enrollment](https://developer.apple.com/documentation/security/secaccesscontrolcreateflags/biometrycurrentset),
 [App Attest’s separate integrity checks](https://developer.apple.com/documentation/devicecheck/establishing-your-app-s-integrity).
 
-## Complete terminal history
+## Current screen and on-demand history
 
-An updated phone sends `attach` with a fresh UUID `historyID`. The Mac replies with
-`historyChunk`: ordered `events`, the same `historyID`, `historyOffset`,
-`historyLength`, `historyComplete`, and the current output `sequence`, owner/epoch
-and input-acknowledgement capability. Each `historyNext` echoes the transfer ID and
-last offset; mismatched/obsolete cursors cannot advance the reader. One reader per
-phone bounds memory and open files. Access is checked on every request.
+An updated phone sends `attach` with a fresh UUID `viewportID`. The Mac serializes a
+`TerminalViewport` containing only the current rendered rows, geometry, cursor,
+application-cursor / bracketed-paste / enhanced-keyboard modes, history row count and
+output sequence. No historical page is fetched by attachment.
 
-The Mac flushes pending PTY output before each read and refreshes the recording’s
-length. Only output/resize events for that downloading phone/session are suppressed;
-other viewers and the local terminal continue normally. The final page and resumption
-of live output occur on the host main actor, with no gap between the recording and
-the next output sequence. The phone renders and journals each page before requesting
-another, with a 20 ms pacing interval to stay within relay frame/byte budgets. Input remains disabled until completion. Disk errors fail explicitly rather
-than silently dropping history. Reconnect starts a fresh download. No total byte cap
-is imposed; sustained output faster than download can delay catching up.
+`viewport` messages carry successive base64 portions (24 KiB raw) of that JSON state,
+with `viewportID`, `sequence`, `historyOffset`, `historyLength` and `historyComplete`.
+The phone validates a contiguous offset and a maximum 8 MiB frame, then acknowledges
+with `viewportNext`. It renders only complete frames. At most one immutable frame is
+in flight per phone; newer output coalesces until its acknowledgement. ACKs are paced
+at 20 ms to respect relay frame/byte budgets even on a fast LAN. Input delivery keeps
+its existing independent epoch/sequence/acknowledgement protocol.
 
-Absent `historyID`, the bounded legacy snapshot behavior is retained. Updated apps
-require a Mac recording for streamed history; the production Mac creates these for
-every session. There is no relay wire-format change: all fields remain inside TLS.
+On a backward scroll, `historyPage` supplies `viewportID`, a fresh `requestID` and an
+exclusive `historyBefore` row. A forward scroll instead supplies inclusive
+`historyStart`. The reply echoes both IDs and returns `[historyStart, historyBefore)`
+plus `historyRows`. Rows and index offsets stay on disk on the Mac. Each page is
+bounded to 64 rows / 64 KiB, including colored output. The phone requests one page
+at a time, paced at 100 ms, and retains at most 256 old rows. Visible-row anchoring
+prevents prepends and live output from moving the reader's position. Taking control
+explicitly returns to the live screen. Disconnect, backgrounding, session switching
+and permission withdrawal clear the phone's cache and pending requests.
+
+Every request is authorized against the current session grant. Transfer/request IDs
+prevent stale responses from populating another session. Terminal query responses
+computed by the Mac emulator go only to the current controller as `terminalResponse`;
+the phone returns them through the normal sequenced input authority. Drawing a frame
+or browsing history never replays recorded commands or terminal query responses.
+
+Absent `viewportID`, bounded legacy snapshot behavior is retained. Update both apps
+for this protocol. No production relay changes are needed: all fields remain inside
+mutually authenticated TLS. Current frames render text and ANSI cell styles; terminal
+image protocols and in-application mouse reporting are outside this view protocol.
+The full original ANSI/geometry recording remains on the Mac.
