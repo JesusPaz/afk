@@ -15,6 +15,10 @@ public final class HostSession: ObservableObject, Identifiable {
     public var onEvent: ((Message) -> Void)?
     public var onState: (() -> Void)?
     private let process = PTYProcess()
+    private var pendingOutput = Data()
+    private var outputTask: Task<Void, Never>?
+    private var acknowledgedInputs: [UInt64] = []
+    private var inputEpoch: UInt64 = 0
     private var localSequence: UInt64 = 0
     private var localSize = TerminalSize.initial
     private var lastRenewal = ProcessInfo.processInfo.systemUptime
@@ -49,7 +53,14 @@ public final class HostSession: ObservableObject, Identifiable {
     public func input(_ bytes: Data, client: String, epoch: UInt64, sequence: UInt64) -> Bool {
         guard running, !bytes.isEmpty, bytes.count <= 8192, lease.accept(client: client, epoch: epoch, sequence: sequence) else { return false }
         lastRenewal = ProcessInfo.processInfo.systemUptime
-        process.send(bytes); return true
+        guard process.send(bytes) else { return false }
+        if inputEpoch != epoch { acknowledgedInputs.removeAll(); inputEpoch = epoch }
+        acknowledgedInputs.append(sequence)
+        if acknowledgedInputs.count > 256 { acknowledgedInputs.removeFirst() }
+        return true
+    }
+    public func acknowledgesInput(client: String, epoch: UInt64, sequence: UInt64) -> Bool {
+        running && lease.owner == client && lease.epoch == epoch && inputEpoch == epoch && acknowledgedInputs.contains(sequence)
     }
     public func localResize(_ size: TerminalSize) {
         guard size.isValid else { return }
@@ -62,6 +73,7 @@ public final class HostSession: ObservableObject, Identifiable {
     }
     private func applySize(_ size: TerminalSize) {
         guard running, size != feed.size, process.resize(columns: size.columns, rows: size.rows) else { return }
+        flushOutput()
         feed.sequence += 1; feed.resize(size)
         var message = Message("resized", sessionID: id)
         message.sequence = feed.sequence; message.columns = size.columns; message.rows = size.rows
@@ -72,16 +84,30 @@ public final class HostSession: ObservableObject, Identifiable {
     }
     public func terminate() {
         guard running else { return }
+        flushOutput()
         process.terminate(); running = false; lease.claim(""); publishControl()
     }
     private func publishControl() {
         var message = Message("control", sessionID: id); message.owner = lease.owner; message.epoch = lease.epoch; onEvent?(message); onState?()
     }
     private func received(_ bytes: Data) {
+        if pendingOutput.count + bytes.count > 64 * 1024 { flushOutput() }
+        pendingOutput.append(bytes)
+        guard outputTask == nil else { return }
+        outputTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+            self?.flushOutput()
+        }
+    }
+    func flushOutput() {
+        outputTask?.cancel(); outputTask = nil
+        guard !pendingOutput.isEmpty else { return }
+        let bytes = pendingOutput; pendingOutput.removeAll()
         feed.sequence += 1; feed.append(bytes)
         var message = Message("output", sessionID: id); message.sequence = feed.sequence; message.data = bytes.base64EncodedString(); onEvent?(message)
     }
     private func exited(_ status: Int32) {
+        flushOutput()
         running = false; lease.claim("")
         var message = Message("exit", sessionID: id); message.message = "Sesión terminada (\(status))."; onEvent?(message); onState?()
     }

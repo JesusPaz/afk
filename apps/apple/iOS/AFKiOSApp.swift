@@ -201,7 +201,7 @@ struct PhoneTerminal: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                Label(!running ? L10n.text("Sesión terminada") : !model.hostAvailable ? L10n.text("Esperando al Mac") : !model.ready ? (model.sessionNotice == nil ? L10n.text("Recuperando la sesión…") : L10n.text("No se pudo abrir la sesión")) : model.canWrite ? L10n.text("Estás escribiendo desde el iPhone") : L10n.text("Estás viendo la sesión"), systemImage: model.canWrite ? "keyboard" : "eye")
+                Label(model.terminalStatus, systemImage: model.canWrite ? "keyboard" : "eye")
                     .font(.subheadline.weight(.medium))
                 if let notice = model.sessionNotice { InlineNotice(text: notice) }
                 if let expiry = model.selectedInfo?.controlExpiresAt {
@@ -211,7 +211,7 @@ struct PhoneTerminal: View {
                     Button(model.canWrite ? L10n.text("Pasar a solo lectura") : L10n.text("Escribir desde aquí")) {
                         if model.canWrite { model.release() } else { model.claim() }
                     }.buttonStyle(.bordered).frame(minHeight: 44).disabled(!model.canClaim)
-                } else if running {
+                } else if !model.hostAvailable || running {
                     Button(L10n.text("Volver a conectar"), systemImage: "arrow.clockwise") { model.reconnect() }
                         .frame(minHeight: 44)
                 }

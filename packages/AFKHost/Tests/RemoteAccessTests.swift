@@ -4,6 +4,26 @@ import AFKCore
 @testable import AFKHost
 
 @MainActor final class RemoteAccessTests: XCTestCase {
+    func testInputReceiptsDoNotRepeatInputOrSurviveLeaseChanges() {
+        let session = HostSession()
+        session.start()
+        defer { session.terminate() }
+        session.claim("phone")
+        let epoch = session.lease.epoch
+        XCTAssertFalse(session.acknowledgesInput(client: "phone", epoch: epoch, sequence: 1))
+        XCTAssertTrue(session.input(Data("x".utf8), client: "phone", epoch: epoch, sequence: 1))
+        XCTAssertFalse(session.input(Data("x".utf8), client: "phone", epoch: epoch, sequence: 1))
+        XCTAssertTrue(session.acknowledgesInput(client: "phone", epoch: epoch, sequence: 1))
+        XCTAssertFalse(session.acknowledgesInput(client: "other", epoch: epoch, sequence: 1))
+        session.resize(TerminalSize(columns: 90, rows: 30), client: "phone", epoch: epoch, sequence: 2)
+        XCTAssertFalse(session.acknowledgesInput(client: "phone", epoch: epoch, sequence: 2))
+        XCTAssertTrue(session.input(Data("y".utf8), client: "phone", epoch: epoch, sequence: 3))
+        XCTAssertFalse(session.acknowledgesInput(client: "phone", epoch: epoch, sequence: 2), "Resize is not proof of delivered input")
+        session.claim("phone")
+        XCTAssertFalse(session.acknowledgesInput(client: "phone", epoch: epoch, sequence: 1))
+        XCTAssertFalse(session.acknowledgesInput(client: "phone", epoch: session.lease.epoch, sequence: 1))
+        XCTAssertFalse(session.input(Data("x".utf8), client: "phone", epoch: epoch, sequence: 1))
+    }
     func testDefaultPrivateAndIndependentDeviceSessionPermissions() {
         let access = RemoteAccess()
         XCTAssertEqual(access.level(client: "phone", session: "one"), .none)

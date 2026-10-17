@@ -32,6 +32,16 @@ class ReleaseTests(unittest.TestCase):
                 self.assertIn(f'version "{tag[1:]}"', text)
                 self.assertIn('AFK-v#{version}-macOS.zip', text)
 
+    def test_cask_uses_dmg_checksum_and_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive, cask = Path(tmp)/'app.dmg', Path(tmp)/'afk.rb'
+            archive.write_bytes(b'notarized disk image')
+            subprocess.run([sys.executable, str(SCRIPTS/'cask.py'), 'v0.1.0-rc.6', str(archive), str(cask)], check=True)
+            text = cask.read_text()
+            self.assertIn(hashlib.sha256(archive.read_bytes()).hexdigest(), text)
+            self.assertIn('AFK-v#{version}-macOS.dmg', text)
+            self.assertIn('app "AFK.app"', text)
+
     def test_profile_rejects_wrong_app_team_expiry_and_distribution(self):
         profile = dict(TeamIdentifier=['TESTTEAM'], Entitlements={'application-identifier': 'TESTTEAM.com.jesuspaz.afk.ios'},
                        ExpirationDate=datetime.datetime.now()+datetime.timedelta(days=30))

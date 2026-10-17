@@ -45,10 +45,11 @@ final class PTYProcess {
         var size = winsize(ws_row: UInt16(rows), ws_col: UInt16(columns), ws_xpixel: 0, ws_ypixel: 0)
         return ioctl(fd, TIOCSWINSZ, &size) == 0
     }
-    func send(_ data: Data) {
-        guard fd >= 0 else { return }
-        guard pending.count + data.count <= 64 * 1024 else { terminate(); return }
+    func send(_ data: Data) -> Bool {
+        guard fd >= 0 else { return false }
+        guard pending.count + data.count <= 64 * 1024 else { terminate(); return false }
         pending.append(data); flush()
+        return fd >= 0
     }
     private func flush() {
         guard fd >= 0 else { return }

@@ -100,7 +100,13 @@ Encrypted application packets use a 4-byte big-endian length and bounded JSON.
 The TLS protocol gate refuses app writes before authentication. Incoming dispatch
 and outgoing queues are bounded to 16 messages / 1 MiB; a packet is at most 512 KiB.
 WebSocket messages are binary, at most 64 KiB, with no compression. Slow or invalid
-peers disconnect; uncertain input is discarded, never resent automatically.
+peers disconnect; input is never replayed across a connection or lease change.
+Within the same lease, the phone retains bounded input until `inputAck` confirms
+the session, epoch and sequence. It retries missing acknowledgements with the
+same sequence; the host acknowledges accepted duplicates without applying them
+again. Snapshots advertise this support with `inputAcknowledgements: true`.
+See [live dictation and delivery confirmation](dictation.md) for batching, bounds
+and retry behavior.
 
 ## Revocation and local access
 

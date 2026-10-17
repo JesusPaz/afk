@@ -9,12 +9,15 @@ tag, archive, destination = sys.argv[1:]
 _, preview = parse(tag)
 token = "afk@preview" if preview else "afk"
 checksum = hashlib.sha256(Path(archive).read_bytes()).hexdigest()
+extension = Path(archive).suffix
+if extension not in (".zip", ".dmg"):
+    raise ValueError("Expected a ZIP or DMG release artifact")
 conflict = "afk" if preview else "afk@preview"
 Path(destination).write_text(f'''cask "{token}" do
   version "{tag[1:]}"
   sha256 "{checksum}"
 
-  url "https://github.com/JesusPaz/afk/releases/download/v#{{version}}/AFK-v#{{version}}-macOS.zip"
+  url "https://github.com/JesusPaz/afk/releases/download/v#{{version}}/AFK-v#{{version}}-macOS{extension}"
   name "AFK"
   desc "Share your Mac terminal with your iPhone"
   homepage "https://github.com/JesusPaz/afk"

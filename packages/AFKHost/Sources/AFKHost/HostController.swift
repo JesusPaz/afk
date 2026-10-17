@@ -227,11 +227,13 @@ public final class HostController: ObservableObject {
         if m.type == "terminate", !access.canClose(client: client, session: session.id) { deny(client, session: session.id); return }
         switch m.type {
         case "attach":
+            session.flushOutput()
             record(.viewed, client: client, session: session.id)
             guard let bytes = session.feed.snapshot else {
                 sendError("El historial supera el límite del POC. La sesión continúa en el Mac; abre una nueva para compartirla.", client: client, session: session.id); return
             }
             var reply = Message("snapshot", sessionID: session.id); reply.clientID = client; reply.events = bytes; reply.sequence = session.feed.sequence
+            reply.inputAcknowledgements = true
             reply.owner = session.lease.owner; reply.epoch = session.lease.epoch; reply.columns = session.feed.size.columns; reply.rows = session.feed.size.rows; relay.send(reply)
         case "claim":
             access.claimed(client: client, session: session.id); session.claim(client); record(.controlTaken, client: client, session: session.id)
@@ -240,6 +242,10 @@ public final class HostController: ObservableObject {
         case "input":
             guard let data = m.data.flatMap({ Data(base64Encoded: $0) }), let epoch = m.epoch, let sequence = m.sequence else { return }
             if session.input(data, client: client, epoch: epoch, sequence: sequence) { access.acceptedInput(client: client, session: session.id) }
+            if session.acknowledgesInput(client: client, epoch: epoch, sequence: sequence) {
+                var ack = Message("inputAck", sessionID: session.id)
+                ack.clientID = client; ack.epoch = epoch; ack.sequence = sequence; relay.send(ack)
+            }
         case "resize":
             guard let columns = m.columns, let rows = m.rows, let epoch = m.epoch, let sequence = m.sequence else { return }
             session.resize(TerminalSize(columns: columns, rows: rows), client: client, epoch: epoch, sequence: sequence)
