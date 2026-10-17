@@ -47,7 +47,7 @@ public struct SecureInvitation: Codable {
         guard value.utf8.count <= 2048 else { throw SecureError.invalidInvitation }
         let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if value.hasPrefix("AFK2:") { throw SecureError.obsoleteInvitation }
-        guard value.utf8.count <= 2048, value.hasPrefix("AFK3:"), let data = Data(base64Encoded: String(value.dropFirst(5))) else { throw SecureError.invalidInvitation }
+        guard value.hasPrefix("AFK3:"), let data = Data(base64Encoded: String(value.dropFirst(5))) else { throw SecureError.invalidInvitation }
         let invite = try JSONDecoder().decode(Self.self, from: data)
         guard invite.version == 3, invite.expires > now, invite.expires.timeIntervalSince(now) <= 310,
               UUID(uuidString: invite.hostID) != nil, UUID(uuidString: invite.id) != nil,
@@ -123,8 +123,8 @@ public struct HostTrustState: Codable {
         try save(next); state = next; enrollmentDisabled = false; invitationDeadline = uptime() + 300
         return invite
     }
-    // Legacy authorization is reconnection only. No invitation can bypass consent.
-    public func authorize(id: String, name: String, certificate: Data, invitationID: String?, secret: String?, now: Date = Date()) throws {
+    // Reconnection requires an already trusted exact certificate.
+    public func authorizeExisting(id: String, certificate: Data) throws {
         guard state.peers.contains(where: { $0.id == id && $0.certificate == certificate }) else { throw SecureError.unauthorized }
     }
     public func reserve(id: String, name: String, certificate: Data, invitationID: String?, secret: String?, now: Date = Date()) throws -> UUID {

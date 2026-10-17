@@ -33,12 +33,12 @@ import CoreImage
         XCTAssertNil(persisted?.pending)
         let restored = HostTrustStore(state: try XCTUnwrap(persisted), save: { persisted = $0 })
         // An acknowledgement lost after commit can recover with the same identity.
-        try restored.authorize(id: id, name: "Phone", certificate: peer.certificate, invitationID: invite.id, secret: invite.secret)
-        XCTAssertThrowsError(try restored.authorize(id: UUID().uuidString, name: "Other", certificate: peer.certificate, invitationID: invite.id, secret: invite.secret))
-        XCTAssertThrowsError(try restored.authorize(id: id, name: "Other", certificate: DeviceIdentity.create().certificate, invitationID: nil, secret: nil))
+        try restored.authorizeExisting(id: id, certificate: peer.certificate)
+        XCTAssertThrowsError(try restored.authorizeExisting(id: UUID().uuidString, certificate: peer.certificate))
+        XCTAssertThrowsError(try restored.authorizeExisting(id: id, certificate: DeviceIdentity.create().certificate))
         try restored.revoke(id)
         let revoked = HostTrustStore(state: try XCTUnwrap(persisted), save: { _ in })
-        XCTAssertThrowsError(try revoked.authorize(id: id, name: "Phone", certificate: peer.certificate, invitationID: invite.id, secret: invite.secret))
+        XCTAssertThrowsError(try revoked.authorizeExisting(id: id, certificate: peer.certificate))
     }
     func testFailedPersistenceNeverAuthorizesOrConsumesInvitation() throws {
         var fail = false
@@ -81,7 +81,7 @@ import CoreImage
         fail = false; try trust.revokeAll()
         let restored = HostTrustStore(state: try XCTUnwrap(saved), save: { _ in })
         XCTAssertTrue(restored.state.peers.isEmpty)
-        XCTAssertThrowsError(try restored.authorize(id: id, name: "Phone", certificate: peer.certificate, invitationID: nil, secret: nil))
+        XCTAssertThrowsError(try restored.authorizeExisting(id: id, certificate: peer.certificate))
     }
     func testRevocationPersistenceFailureKeepsStateConsistent() throws {
         var fail = false
@@ -100,7 +100,7 @@ import CoreImage
         let store = HostTrustStore(state: HostTrustState(identity: try DeviceIdentity.create()), save: { persisted = $0 })
         let invite = try store.invitation(server: "https://example.com", host: host)
         let peer = try DeviceIdentity.create(), id = UUID().uuidString
-        XCTAssertThrowsError(try store.authorize(id: id, name: "Phone", certificate: peer.certificate, invitationID: invite.id, secret: invite.secret))
+        XCTAssertThrowsError(try store.authorizeExisting(id: id, certificate: peer.certificate))
         let token = try store.reserve(id: id, name: "Phone", certificate: peer.certificate, invitationID: invite.id, secret: invite.secret)
         XCTAssertTrue(store.state.peers.isEmpty); XCTAssertTrue(persisted!.peers.isEmpty)
         for _ in 0..<4 {

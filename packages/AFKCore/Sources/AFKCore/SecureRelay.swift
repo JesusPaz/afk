@@ -139,7 +139,7 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
                     welcome.server = base.absoluteString; welcome.hostID = host.id; welcome.clientID = offer.clientID
                     welcome.nonce = nonce; welcome.fingerprint = DeviceIdentity.fingerprint(certificate)
                     if trust.state.peers.contains(where: { $0.id == offer.clientID }) {
-                        try trust.authorize(id: offer.clientID, name: "", certificate: certificate, invitationID: nil, secret: nil)
+                        try trust.authorizeExisting(id: offer.clientID, certificate: certificate)
                         self.finishAuthorization(offer.clientID, welcome: welcome, transport: transport)
                     } else {
                         guard packet.ceremony == 3 else { throw SecureError.unauthorized }

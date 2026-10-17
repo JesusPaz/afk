@@ -140,7 +140,9 @@ struct PairForm: View {
                             Task {
                                 let allowed = await AVCaptureDevice.requestAccess(for: .video)
                                 guard phase == .active else { return }
-                                if allowed && DataScannerViewController.isSupported && DataScannerViewController.isAvailable { scanning = true }
+                                if allowed && DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+                                    invitation = ""; origin = nil; scanning = true
+                                }
                                 else { model.error = L10n.text("Cámara no disponible. Puedes pegar la invitación o habilitar la cámara en Ajustes.") }
                             }
                         }

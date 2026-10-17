@@ -39,7 +39,7 @@ harness cleanup; its log is `/tmp/afk-public-tests.log`.
 | P17 | Pending two-device physical test by Jesus. Public WSS native integration for this change passed; it does not replace a physical iPhone test. |
 
 Run `swift test`, `scripts/test-secure.sh`, and `GOFLAGS=-count=1 scripts/test-server.sh`.
-The native suite has separate relay instances per scenario so it respects the
+The local native suite has separate relay instances per scenario so it respects the
 existing 30-request/minute budget. Production relay behavior and session permissions
 are unchanged. Native build commands remain in README.
 
@@ -49,7 +49,7 @@ These logs are temporary, not release artifacts.
 
 ## Karpathy review of the implementation
 
-- Reservation and approval are separate; the legacy `authorize` path can only
+- Reservation and approval are separate; the `authorizeExisting` path can only
   reconnect an already trusted exact certificate. No post-authorization dialog.
 - The phone candidate remains transient until authenticated welcome; failure does
   not overwrite its old link. No cross-device atomicity is claimed.
@@ -61,6 +61,22 @@ These logs are temporary, not release artifacts.
   than changing production limits. Temporary diagnostic logging was removed.
 - Canceled Swift tasks close their own attempt; wall expiry and monotonic limits
   are checked independently. QR payload and comparison codes are never logged.
+
+### PR #5 audit findings and corrections
+
+Reviewed the PR diff against the four Karpathy rules on 2026-10-16. Scope is the
+implementation and its tests, not an independent cryptographic assessment.
+
+| Severity / rule | Concrete finding | Correction and evidence |
+| --- | --- | --- |
+| P2 · Think before coding | Paste an invitation, open the scanner, then cancel it: `onDismiss` could validate the earlier pasted value and reopen server confirmation. No network request occurred without confirmation, but cancel did not end that UI path. | Clear the old input/origin when opening the scanner. Only an accepted scan supplies its dismissal payload. iOS builds; physical camera/cancel validation remains in P14. |
+| P2 · Goal-driven execution | The integration harness ignored a failed database cleanup, so a passing test did not establish that its temporary host was removed. | Bound cleanup to ten seconds; fail on deletion error or unless a successful scenario removes exactly one host. Re-run native integration and public WSS with this check. |
+| P3 · Simplicity first | The reconnection API still accepted unused name, invitation, secret and time arguments, obscuring that it can no longer enroll a device. The parser also repeated its already-enforced byte limit. | Rename to `authorizeExisting(id:certificate:)`, remove unused arguments and the duplicate check; keep the single limit before trimming/decoding. Exact-certificate/revoked/new-peer tests and native reconnect coverage remain. |
+
+Surgical-change check: fixes stay within the new scanner flow, trust API and
+integration harness. No session-control, production relay, dependency or deployment
+change was needed. No additional blocking implementation findings were found in
+this review; the physical and independent-review gates below remain open.
 
 ## Remaining release gates
 
