@@ -3,7 +3,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
-import zipfile
+import tarfile
+import io
 
 spec = importlib.util.spec_from_file_location('delivery', Path(__file__).with_name('eas-delivery.py'))
 delivery = importlib.util.module_from_spec(spec)
@@ -26,7 +27,7 @@ class DeliveryTests(unittest.TestCase):
             for variant in ('valid', 'missing', 'extra', 'duplicate'):
                 with self.subTest(tag=tag, variant=variant), tempfile.TemporaryDirectory() as directory:
                     root = Path(directory)
-                    bundle = root / 'bundle.zip'
+                    bundle = root / 'bundle.tar.gz'
                     names = sorted(expected)
                     if variant == 'missing':
                         names.pop()
@@ -34,9 +35,12 @@ class DeliveryTests(unittest.TestCase):
                         names.append('AuthKey.p8')
                     if variant == 'duplicate':
                         names.append('other/' + names[0])
-                    with zipfile.ZipFile(bundle, 'w') as archive:
+                    with tarfile.open(bundle, 'w:gz') as archive:
                         for name in names:
-                            archive.writestr('dist/' + name, b'expected artifact')
+                            data = b'expected artifact'
+                            item = tarfile.TarInfo('dist/' + name)
+                            item.size = len(data)
+                            archive.addfile(item, io.BytesIO(data))
                     if variant == 'valid':
                         delivery.extract_assets(bundle, root / 'dist', tag)
                         self.assertEqual({p.name for p in (root / 'dist').iterdir()}, expected)

@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
-import zipfile
+import tarfile
 from version import parse
 
 
@@ -25,12 +25,14 @@ def expected_assets(tag):
 
 def extract_assets(archive, destination, tag):
     expected = expected_assets(tag)
-    with zipfile.ZipFile(archive) as bundle:
+    with tarfile.open(archive, 'r:gz') as bundle:
         files = {}
-        for item in bundle.infolist():
-            if item.is_dir():
+        for item in bundle.getmembers():
+            if item.isdir():
                 continue
-            name = Path(item.filename).name
+            if not item.isfile():
+                raise ValueError('Release artifacts must be regular files')
+            name = Path(item.name).name
             if name not in expected or name in files:
                 raise ValueError('Unexpected or duplicate release artifact')
             files[name] = item
@@ -38,7 +40,7 @@ def extract_assets(archive, destination, tag):
             raise ValueError('Incomplete Mac release artifacts')
         destination.mkdir(exist_ok=True)
         for name, item in files.items():
-            (destination / name).write_bytes(bundle.read(item))
+            (destination / name).write_bytes(bundle.extractfile(item).read())
 
 
 def main():
@@ -79,7 +81,7 @@ def main():
             url = artifacts[0]['downloadUrl']
             if not url.startswith('https://'):
                 raise ValueError('Expected HTTPS artifact download')
-            bundle = root / 'mac.zip'
+            bundle = root / 'mac.tar.gz'
             urllib.request.urlretrieve(url, bundle)
             extract_assets(bundle, Path('dist'), tag)
             subprocess.run(['shasum', '-a', '256', '-c', 'SHA256SUMS'], cwd='dist', check=True)
