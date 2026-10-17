@@ -42,29 +42,33 @@ public struct SecureInvitation: Codable {
     public let id: String
     public let secret: String
     public let expires: Date
-    public func encoded() throws -> String { "AFK2:" + (try JSONEncoder().encode(self)).base64EncodedString() }
+    public func encoded() throws -> String { "AFK3:" + (try JSONEncoder().encode(self)).base64EncodedString() }
     public static func decode(_ value: String, now: Date = Date()) throws -> Self {
+        guard value.utf8.count <= 2048 else { throw SecureError.invalidInvitation }
         let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard value.count < 4096, value.hasPrefix("AFK2:"), let data = Data(base64Encoded: String(value.dropFirst(5))) else { throw SecureError.invalidInvitation }
+        if value.hasPrefix("AFK2:") { throw SecureError.obsoleteInvitation }
+        guard value.hasPrefix("AFK3:"), let data = Data(base64Encoded: String(value.dropFirst(5))) else { throw SecureError.invalidInvitation }
         let invite = try JSONDecoder().decode(Self.self, from: data)
-        guard invite.version == 2, invite.expires > now, invite.expires.timeIntervalSince(now) <= 310,
+        guard invite.version == 3, invite.expires > now, invite.expires.timeIntervalSince(now) <= 310,
               UUID(uuidString: invite.hostID) != nil, UUID(uuidString: invite.id) != nil,
-              invite.secret.count == 43, invite.fingerprint.count == 64,
-              invite.fingerprint.allSatisfy({ $0.isHexDigit && !$0.isUppercase }),
+              invite.secret.count == 43, invite.secret.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 45 || $0 == 95 }),
+              invite.code.utf8.count <= 16, !invite.code.isEmpty, invite.code.utf8.allSatisfy({ (33...126).contains($0) }), invite.server.utf8.count <= 512, invite.fingerprint.count == 64,
+              invite.fingerprint.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
               try canonicalServer(invite.server) == invite.server else { throw SecureError.invalidInvitation }
         return invite
     }
 }
 
 public enum SecureError: Error, LocalizedError {
-    case invalidInvitation, unauthorized, persistence, protocolViolation, disconnected
+    case obsoleteInvitation, invalidInvitation, unauthorized, persistence, protocolViolation, disconnected
     public var errorDescription: String? {
         switch self {
-        case .invalidInvitation: return "La invitación segura no es válida o venció. Crea otra en el Mac."
-        case .unauthorized: return "No se pudo verificar la identidad del dispositivo."
-        case .persistence: return "No se pudo guardar la autorización."
-        case .protocolViolation: return "La conexión segura no cumple el protocolo."
-        case .disconnected: return "Se cerró la conexión segura. Reconecta para continuar."
+        case .obsoleteInvitation: return L10n.text("Actualiza ambas apps y genera una invitación nueva en el Mac.")
+        case .invalidInvitation: return L10n.text("La invitación segura no es válida o venció. Crea otra en el Mac.")
+        case .unauthorized: return L10n.text("No se pudo verificar la identidad del dispositivo.")
+        case .persistence: return L10n.text("No se pudo guardar la autorización.")
+        case .protocolViolation: return L10n.text("La conexión segura no cumple el protocolo.")
+        case .disconnected: return L10n.text("Se cerró la conexión segura. Reconecta para continuar.")
         }
     }
 }
@@ -97,44 +101,68 @@ public struct HostTrustState: Codable {
 // Persist the entire authorization transaction before exposing its result to either peer.
 @MainActor public final class HostTrustStore {
     public private(set) var state: HostTrustState
+    public private(set) var enrollmentDisabled = false
+    private var reservation: (token: UUID, peer: TrustedDevice, invitation: String, deadline: TimeInterval)?
+    private var invitationDeadline: TimeInterval?
+    private let uptime: () -> TimeInterval
     private let save: (HostTrustState) throws -> Void
-    public init(state: HostTrustState, save: @escaping (HostTrustState) throws -> Void) { self.state = state; self.save = save }
+    public init(state: HostTrustState, save: @escaping (HostTrustState) throws -> Void, uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) { self.state = state; self.save = save; self.uptime = uptime }
     public convenience init(account: String) throws {
         let state = try SecretStore.read(account) ?? HostTrustState(identity: DeviceIdentity.create())
         try SecretStore.write(state, account: account)
         self.init(state: state, save: { try SecretStore.write($0, account: account) })
+        try cancelInvitation()
     }
     public func invitation(server: String, host: HostIdentity, now: Date = Date()) throws -> SecureInvitation {
-        let invite = try SecureInvitation(version: 2, server: canonicalServer(server), hostID: host.id, code: host.code,
+        try cancelInvitation()
+        let invite = try SecureInvitation(version: 3, server: canonicalServer(server), hostID: host.id, code: host.code,
             fingerprint: state.identity.fingerprint, id: UUID().uuidString, secret: SecretStore.randomToken(), expires: now.addingTimeInterval(300))
+        _ = try SecureInvitation.decode(invite.encoded(), now: now)
         var next = state
         next.pending = PendingInvitation(id: invite.id, hash: DeviceIdentity.fingerprint(Data(invite.secret.utf8)), expires: invite.expires, attempts: 0)
-        try save(next); state = next
+        try save(next); state = next; enrollmentDisabled = false; invitationDeadline = uptime() + 300
         return invite
     }
-    public func authorize(id: String, name: String, certificate: Data, invitationID: String?, secret: String?, now: Date = Date()) throws {
-        guard UUID(uuidString: id) != nil, name.count <= 80 else { throw SecureError.unauthorized }
-        if let peer = state.peers.first(where: { $0.id == id }) {
-            guard peer.certificate == certificate else { throw SecureError.unauthorized }
-            return
-        }
-        guard var pending = state.pending, pending.expires > now, pending.attempts < 5, state.peers.count < 16 else { throw SecureError.unauthorized }
+    // Reconnection requires an already trusted exact certificate.
+    public func authorizeExisting(id: String, certificate: Data) throws {
+        guard state.peers.contains(where: { $0.id == id && $0.certificate == certificate }) else { throw SecureError.unauthorized }
+    }
+    public func reserve(id: String, name: String, certificate: Data, invitationID: String?, secret: String?, now: Date = Date()) throws -> UUID {
+        guard !enrollmentDisabled, var pending = state.pending, pending.expires > now,
+              let deadline = invitationDeadline, uptime() < deadline,
+              pending.attempts < 5, state.peers.count < 16 else { throw SecureError.unauthorized }
         pending.attempts += 1
         var next = state; next.pending = pending
-        guard invitationID == pending.id, let secret, secret.count == 43,
-              DeviceIdentity.fingerprint(Data(secret.utf8)) == pending.hash else {
-            try save(next); state = next; throw SecureError.unauthorized
-        }
-        next.peers.append(TrustedDevice(id: id, name: name, certificate: certificate)); next.pending = nil
-        try save(next); state = next
+        do { try save(next); state = next } catch { enrollmentDisabled = true; reservation = nil; throw error }
+        guard reservation == nil, UUID(uuidString: id) != nil, name.utf8.count <= 80,
+              !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+              !state.peers.contains(where: { $0.id == id }),
+              invitationID == pending.id, let secret, secret.count == 43,
+              DeviceIdentity.fingerprint(Data(secret.utf8)) == pending.hash else { throw SecureError.unauthorized }
+        let token = UUID()
+        reservation = (token, TrustedDevice(id: id, name: name, certificate: certificate), pending.id,
+                       min(deadline, uptime() + min(120, pending.expires.timeIntervalSince(now))))
+        return token
+    }
+    public func confirm(_ token: UUID, now: Date = Date()) throws {
+        guard !enrollmentDisabled, let candidate = reservation, candidate.token == token,
+              let pending = state.pending, pending.id == candidate.invitation,
+              pending.expires > now, uptime() < candidate.deadline else { throw SecureError.unauthorized }
+        var next = state; next.peers.append(candidate.peer); next.pending = nil
+        do { try save(next) } catch { enrollmentDisabled = true; reservation = nil; throw error }
+        state = next; reservation = nil; invitationDeadline = nil
     }
     public func cancelInvitation() throws {
-        var next = state; next.pending = nil; try save(next); state = next
+        reservation = nil; invitationDeadline = nil
+        var next = state; next.pending = nil
+        do { try save(next); state = next } catch { enrollmentDisabled = true; throw error }
     }
     public func revokeAll() throws {
+        try cancelInvitation()
         var next = state; next.peers = []; next.pending = nil; try save(next); state = next
     }
     public func revoke(_ id: String) throws {
+        try cancelInvitation()
         var next = state; next.peers.removeAll { $0.id == id }; next.pending = nil
         try save(next); state = next
     }

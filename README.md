@@ -37,7 +37,7 @@ AFK sessions advertise `TERM=xterm-256color`, `COLORTERM=truecolor` and `TERM_PR
 AFK connects to the saved relay when the Mac app opens, unless remote access was explicitly paused. Pausing persists across launches. Development builds signed ad hoc may ask for Keychain authorization again after recompilation; use a consistent Apple signing identity for a stable development identity.
 
 1. On Mac, a local shell opens immediately. Choose **Vincular iPhone**.
-2. On iPhone, choose **Vincular Mac** and paste the secure invitation copied from the Mac.
+2. On iPhone, choose **Vincular Mac**, scan the QR (or paste the invitation), and confirm the displayed server. Compare the code on both screens, then approve on the Mac with local authentication.
 3. On Mac, open **Dispositivos → Sesiones y permisos** and explicitly share sessions. Pairing alone exposes none. Choose read-only or temporary control (15 minutes, 1 hour, 8 hours); creation and closing are separate permissions. On iPhone, open a shared session and take control if allowed.
 4. On Mac, choose **Recuperar control** (`⌘⇧L`) to write locally again.
 5. Manage linked phones and access history under **Dispositivos**. Five minutes without accepted input downgrades control to read-only. **Cortar todo acceso remoto** clears session grants; revocation also removes device trust. Both leave local terminals running. Grants are cleared when AFK quits.
@@ -75,7 +75,7 @@ The unsigned commands above are compile checks. To **run** the iPhone simulator 
 - Sessions survive closing the Mac window, **not quitting AFK, reboot or sleep with an active network connection**. There is no separate background helper yet.
 - Manual reconnect. No offline keystroke queue or automatic retries of input.
 - SwiftUI screens implement the functional flows; final visual polish and accessibility/device validation remain.
-- No QR pairing, signed installer, App Store release, accounts, file transfer, audio, screen mirroring, Android, Windows or Linux host.
+- No signed installer, App Store release, accounts, file transfer, audio, screen mirroring, Android, Windows or Linux host.
 
 See [architecture](docs/architecture.md), [protocol](docs/protocol.md), [roadmap](docs/roadmap.md). MIT licensed.
 

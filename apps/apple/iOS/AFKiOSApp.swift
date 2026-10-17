@@ -1,4 +1,6 @@
 import SwiftUI
+import AVFoundation
+import VisionKit
 import AFKCore
 
 @main
@@ -41,7 +43,7 @@ struct PhoneHome: View {
                             }
                             VStack(alignment: .leading, spacing: 20) {
                                 InstructionRow(number: "1", title: L10n.text("Abre AFK en tu Mac"), detail: L10n.text("Elige «Vincular iPhone»."))
-                                InstructionRow(number: "2", title: L10n.text("Pega la invitación segura"), detail: L10n.text("Copia la invitación que aparece en tu Mac."))
+                                InstructionRow(number: "2", title: L10n.text("Escanea el QR"), detail: L10n.text("Escanea el QR que aparece en tu Mac."))
                             }
                             Button { showPair = true } label: {
                                 Text(L10n.text("Vincular mi Mac")).fontWeight(.semibold).frame(maxWidth: .infinity, minHeight: 44)
@@ -113,39 +115,80 @@ struct PhoneHome: View {
 struct PairForm: View {
     @ObservedObject var model: RemoteModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var phase
     @State private var invitation = ""
     @State private var busy = false
+    @State private var scanning = false
+    @State private var origin: String?
+    @State private var confirmOrigin = false
+    @State private var completed = false
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Label(L10n.text("En tu Mac, abre AFK y pulsa «Vincular iPhone»."), systemImage: "desktopcomputer")
-                    Text(L10n.text("Copia la invitación segura del Mac y pégala aquí. Incluye la identidad del Mac y el servidor."))
-                    if model.linked { Text(L10n.text("Este vínculo reemplazará en el iPhone al Mac que tienes guardado.")) }
-                }
-                Section {
-                    SecureField(L10n.text("Invitación segura"), text: $invitation)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                } footer: { Text(L10n.text("La invitación dura cinco minutos y solo se puede usar una vez.")) }
-                Section {
-                    Button {
-                        Task {
-                            busy = true; model.error = nil
-                            await model.pair(invitation: invitation)
-                            busy = false
-                            if model.error == nil { invitation = ""; dismiss() }
+                if completed {
+                    Text(L10n.text("Vinculado. Comparte sesiones desde tu Mac"))
+                } else if busy {
+                    if let code = model.comparisonCode {
+                        Text(code).font(.system(size: 36, weight: .semibold, design: .monospaced))
+                        Text(L10n.text("Confirma en tu Mac"))
+                    } else { ProgressView(L10n.text("Conectando…")) }
+                } else {
+                    Section {
+                        Label(L10n.text("En tu Mac, abre AFK y pulsa «Vincular iPhone»."), systemImage: "desktopcomputer")
+                        if model.linked { Text(L10n.text("Este vínculo reemplazará en el iPhone al Mac que tienes guardado.")) }
+                        Button(L10n.text("Escanear QR"), systemImage: "qrcode.viewfinder") {
+                            Task {
+                                let allowed = await AVCaptureDevice.requestAccess(for: .video)
+                                guard phase == .active else { return }
+                                if allowed && DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+                                    invitation = ""; origin = nil; scanning = true
+                                }
+                                else { model.error = L10n.text("Cámara no disponible. Puedes pegar la invitación o habilitar la cámara en Ajustes.") }
+                            }
                         }
-                    } label: {
-                        HStack { if busy { ProgressView() }; Text(L10n.text("Vincular Mac")) }
-                    }.disabled(busy || invitation.isEmpty)
-                    if let error = model.error { InlineNotice(text: error) }
-                } footer: { Text(L10n.text("El Mac verifica tu dispositivo. La terminal viaja cifrada de extremo a extremo.")) }
+                    }
+                    Section(L10n.text("Pegar invitación")) {
+                        SecureField(L10n.text("Invitación segura"), text: $invitation)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Button(L10n.text("Continuar")) { validate() }.disabled(invitation.isEmpty)
+                    }
+                }
+                if let error = model.error { InlineNotice(text: error) }
             }
             .navigationTitle(L10n.text("Vincular Mac"))
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.text("Cancelar")) { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) {
+                Button(L10n.text(completed ? "Cerrar" : "Cancelar")) { model.cancelPairing(); invitation = ""; dismiss() }
+            } }
             .onAppear { model.error = nil }
+            .onDisappear { model.cancelPairing(); invitation = "" }
+            .onChange(of: phase) { _, next in
+                if next == .background { scanning = false; invitation = ""; origin = nil; confirmOrigin = false; model.cancelPairing() }
+            }
             .interactiveDismissDisabled(busy)
+            .sheet(isPresented: $scanning, onDismiss: { if !invitation.isEmpty { validate() } }) {
+                NavigationStack {
+                    PairingScanner(accept: { value in scanning = false; invitation = value }, unavailable: {
+                        scanning = false
+                        model.error = L10n.text("Cámara no disponible. Puedes pegar la invitación o habilitar la cámara en Ajustes.")
+                    })
+                        .navigationTitle(L10n.text("Escanear QR"))
+                        .toolbar { Button(L10n.text("Cancelar")) { scanning = false } }
+                }
+            }
+            .confirmationDialog(L10n.text("Conectar con este servidor"), isPresented: $confirmOrigin, titleVisibility: .visible) {
+                Button(L10n.text("Continuar")) {
+                    guard !busy else { return }
+                    busy = true; model.error = nil
+                    let value = invitation; invitation = ""
+                    Task { await model.pair(invitation: value); busy = false; completed = model.error == nil }
+                }
+                Button(L10n.text("Cancelar"), role: .cancel) { invitation = ""; origin = nil }
+            } message: { Text(origin ?? "") }
         }
+    }
+    private func validate() {
+        do { origin = try SecureInvitation.decode(invitation).server; confirmOrigin = true }
+        catch { model.error = error.localizedDescription; invitation = "" }
     }
 }
 
@@ -212,6 +255,47 @@ struct PhoneTerminal: View {
         case "→": return L10n.text("Flecha derecha")
         case "Ctrl+C": return L10n.text("Control C, interrumpir comando")
         default: return key
+        }
+    }
+}
+
+struct PairingScanner: UIViewControllerRepresentable {
+    let accept: (String) -> Void
+    let unavailable: () -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(accept: accept, unavailable: unavailable) }
+    func makeUIViewController(context: Context) -> DataScannerViewController {
+        let scanner = DataScannerViewController(recognizedDataTypes: [.barcode(symbologies: [.qr])],
+            qualityLevel: .accurate, recognizesMultipleItems: false, isGuidanceEnabled: true, isHighlightingEnabled: true)
+        scanner.delegate = context.coordinator
+        do { try scanner.startScanning() } catch { DispatchQueue.main.async { context.coordinator.unavailable() } }
+        return scanner
+    }
+    func updateUIViewController(_ controller: DataScannerViewController, context: Context) {}
+    static func dismantleUIViewController(_ controller: DataScannerViewController, coordinator: Coordinator) {
+        coordinator.finished = true; controller.stopScanning()
+    }
+    final class Coordinator: NSObject, DataScannerViewControllerDelegate {
+        let accept: (String) -> Void
+        var finished = false
+        let unavailable: () -> Void
+        init(accept: @escaping (String) -> Void, unavailable: @escaping () -> Void) { self.accept = accept; self.unavailable = unavailable }
+        func dataScanner(_ scanner: DataScannerViewController, becameUnavailableWithError error: DataScannerViewController.ScanningUnavailable) {
+            guard !finished else { return }; finished = true; scanner.stopScanning(); unavailable()
+        }
+        func dataScanner(_ scanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) {
+            consume(addedItems, scanner: scanner)
+        }
+        func dataScanner(_ scanner: DataScannerViewController, didUpdate updatedItems: [RecognizedItem], allItems: [RecognizedItem]) {
+            consume(updatedItems, scanner: scanner)
+        }
+        private func consume(_ items: [RecognizedItem], scanner: DataScannerViewController) {
+            guard !finished else { return }
+            for item in items {
+                guard case .barcode(let barcode) = item, let value = barcode.payloadStringValue,
+                      value.utf8.count <= 2048,
+                      (try? SecureInvitation.decode(value)) != nil || value.hasPrefix("AFK2:") else { continue }
+                finished = true; scanner.stopScanning(); accept(value); return
+            }
         }
     }
 }

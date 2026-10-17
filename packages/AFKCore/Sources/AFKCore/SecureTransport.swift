@@ -14,6 +14,9 @@ struct SecurePacket: Codable {
     var clientID: String?
     var nonce: String?
     var invitationID: String?
+    var ceremony: Int?
+    var approvalID: String?
+    var hostNonce: String?
     var secret: String?
     var name: String?
     var fingerprint: String?
