@@ -267,3 +267,8 @@
 "Escanéalo con AFK o copia la invitación y pégala en el iPhone." = "Escanéalo con AFK o copia la invitación y pégala en el iPhone.";
 
 "Escanea el QR que aparece en tu Mac." = "Escanea el QR que aparece en tu Mac.";
+
+"La entrada es demasiado grande. Se detuvo el envío; revisa la terminal antes de continuar." = "La entrada es demasiado grande. Se detuvo el envío; revisa la terminal antes de continuar.";
+"El Mac no confirmó la entrada. Revisa la terminal antes de continuar." = "El Mac no confirmó la entrada. Revisa la terminal antes de continuar.";
+"Actualiza AFK en el Mac para escribir con confirmación de entrega." = "Actualiza AFK en el Mac para escribir con confirmación de entrega.";
+"Hay entrada sin confirmar. Revisa la terminal antes de volver a escribir." = "Hay entrada sin confirmar. Revisa la terminal antes de volver a escribir.";

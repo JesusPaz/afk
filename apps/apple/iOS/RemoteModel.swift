@@ -22,6 +22,11 @@ final class RemoteModel: ObservableObject {
     @Published var hostName = L10n.text("Tu Mac")
     @Published var linked = false
     @Published var hostAvailable = false
+    private lazy var inputBuffer = TerminalInputBuffer(send: { [weak self] in self?.sendInput($0, retry: $1) }, failed: { [weak self] in
+        self?.release()
+        self?.sessionNotice = L10n.text("El Mac no confirmó la entrada. Revisa la terminal antes de continuar.")
+    })
+    private var inputAcknowledgements = false
     private var epoch: UInt64 = 0
     private var inputSequence: UInt64 = 0
     private var viewport: TerminalSize?
@@ -30,10 +35,18 @@ final class RemoteModel: ObservableObject {
     private var renewal: Timer?
     @Published var canCreate = false
     var selectedInfo: SessionInfo? { sessions.first { $0.id == selected } }
-    var canClaim: Bool { ready && selectedInfo?.canControl == true }
+    var terminalStatus: String {
+        if !hostAvailable { return L10n.text("Sin conexión. Reintenta para continuar.") }
+        if selectedInfo?.running == false { return L10n.text("Sesión terminada") }
+        if !ready { return L10n.text(sessionNotice == nil ? "Recuperando la sesión…" : "No se pudo abrir la sesión") }
+        return L10n.text(canWrite ? "Estás escribiendo desde el iPhone" : "Estás viendo la sesión")
+    }
+    var canClaim: Bool { ready && inputAcknowledgements && selectedInfo?.canControl == true }
     var canTerminate: Bool { ready && selectedInfo?.canTerminate == true }
     var canWrite: Bool { canClaim && owner == credentials?.clientID }
     private func clearTerminal() {
+        if inputBuffer.hasPendingInput { sessionNotice = L10n.text("Hay entrada sin confirmar. Revisa la terminal antes de volver a escribir.") }
+        inputBuffer.cancel()
         ready = false; owner = ""; epoch = 0; inputSequence = 0
         _ = feed.reset([], sequence: 0)
     }
@@ -78,6 +91,7 @@ final class RemoteModel: ObservableObject {
     }
     func reconnect() {
         guard !unlock.isBusy, !reconnecting, !pairing else { return }
+        inputBuffer.cancel()
         ready = false; reconnecting = true
         Task {
             defer { reconnecting = false }
@@ -87,10 +101,11 @@ final class RemoteModel: ObservableObject {
     }
     func attach(_ id: String) {
         if selected != id { release(); epoch = 0; inputSequence = 0 }
+        inputBuffer.cancel()
         selected = id; ready = false; sessionNotice = nil; relay.send(Message("attach", sessionID: id))
     }
     func claim() { guard canClaim else { return }; relay.send(Message("claim", sessionID: selected)) }
-    func release() { if canWrite { relay.send(Message("release", sessionID: selected)) }; owner = "" }
+    func release() { inputBuffer.cancel(); if canWrite { relay.send(Message("release", sessionID: selected)) }; owner = "" }
     func leave() { release(); selected = nil; ready = false }
     func suspend() { cancelPairing(); unlock.invalidate(); release(); relay.disconnect(); ready = false; sessions = []; _ = feed.reset([], sequence: 0) }
     func resize(_ size: TerminalSize) {
@@ -105,9 +120,18 @@ final class RemoteModel: ObservableObject {
         relay.send(m)
     }
     func input(_ bytes: Data) {
-        guard canWrite, bytes.count <= 8192 else { return }
-        inputSequence += 1
-        var m = Message("input", sessionID: selected); m.epoch = epoch; m.sequence = inputSequence; m.data = bytes.base64EncodedString(); relay.send(m)
+        guard canWrite else { return }
+        guard inputBuffer.append(bytes) else {
+            release()
+            sessionNotice = L10n.text("La entrada es demasiado grande. Se detuvo el envío; revisa la terminal antes de continuar.")
+            return
+        }
+    }
+    private func sendInput(_ bytes: Data, retry: UInt64?) -> UInt64? {
+        guard canWrite else { inputBuffer.cancel(); return nil }
+        if retry == nil { inputSequence += 1 }
+        var m = Message("input", sessionID: selected); m.epoch = epoch; m.sequence = retry ?? inputSequence; m.data = bytes.base64EncodedString(); relay.send(m)
+        return m.sequence
     }
     func terminate() { guard canTerminate else { return }; relay.send(Message("terminate", sessionID: selected)) }
     func create() { guard canCreate else { return }; var m = Message("create", sessionID: UUID().uuidString); m.name = L10n.format("Terminal %lld", sessions.count + 1); relay.send(m) }
@@ -115,15 +139,18 @@ final class RemoteModel: ObservableObject {
         switch m.type {
         case "welcome": relay.send(Message("list"))
         case "hostOnline": hostAvailable = true; relay.send(Message("list")); if let selected { attach(selected) }
-        case "hostOffline": hostAvailable = false; ready = false; owner = ""; status = L10n.text("El Mac no está disponible")
+        case "hostOffline": inputBuffer.cancel(); hostAvailable = false; ready = false; owner = ""; status = L10n.text("El Mac no está disponible")
         case "sessions":
             hostAvailable = true; sessions = m.sessions ?? []; canCreate = m.canCreate == true
             if let selected, !sessions.contains(where: { $0.id == selected }) {
                 clearTerminal(); self.selected = nil; sessionNotice = L10n.text("El Mac retiró el acceso a esta sesión.")
-            } else if !canClaim { owner = "" }
+            } else if !canClaim { inputBuffer.cancel(); owner = "" }
 
         case "snapshot":
             guard m.sessionID == selected, selectedInfo != nil, let events = m.events, feed.reset(events, sequence: m.sequence ?? 0) else { return }
+            if owner != (m.owner ?? "") || epoch != m.epoch { inputBuffer.cancel() }
+            inputAcknowledgements = m.inputAcknowledgements == true
+            if !inputAcknowledgements { sessionNotice = L10n.text("Actualiza AFK en el Mac para escribir con confirmación de entrega.") }
             owner = m.owner ?? ""; if epoch != m.epoch { inputSequence = 0 }; epoch = m.epoch ?? 0; ready = true; sendSize()
         case "output", "resized":
             guard ready, m.sessionID == selected, let sequence = m.sequence, sequence > feed.sequence else { return }
@@ -133,10 +160,18 @@ final class RemoteModel: ObservableObject {
             }
             if let data = m.data.flatMap({ Data(base64Encoded: $0) }) { feed.sequence = sequence; feed.append(data) }
         case "control":
-            guard m.sessionID == selected else { return }; owner = m.owner ?? ""; if epoch != m.epoch { inputSequence = 0 }; epoch = m.epoch ?? 0; sendSize()
-        case "exit": if m.sessionID == selected { ready = false; owner = ""; sessionNotice = L10n.text("Sesión terminada") }
+            guard m.sessionID == selected else { return }; if owner != (m.owner ?? "") || epoch != m.epoch { inputBuffer.cancel() }
+            owner = m.owner ?? ""; if epoch != m.epoch { inputSequence = 0 }; epoch = m.epoch ?? 0; sendSize()
+        case "inputAck":
+            guard m.sessionID == selected, m.epoch == epoch, let sequence = m.sequence else { return }
+            inputBuffer.acknowledge(sequence)
+        case "exit":
+            if m.sessionID == selected {
+                inputBuffer.cancel(); ready = false; owner = ""; sessionNotice = L10n.text("Sesión terminada")
+                if let index = sessions.firstIndex(where: { $0.id == selected }) { sessions[index].running = false }
+            }
         case "error":
-            if let sessionID = m.sessionID, sessionID == selected { ready = false; sessionNotice = m.message.map { L10n.text($0) } }
+            if let sessionID = m.sessionID, sessionID == selected { inputBuffer.cancel(); ready = false; sessionNotice = m.message.map { L10n.text($0) } }
             else { error = m.message.map { L10n.text($0) } }
         default: break
         }

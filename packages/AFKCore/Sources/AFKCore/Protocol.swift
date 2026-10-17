@@ -27,6 +27,7 @@ public struct Message: Codable {
     public var owner: String?
     public var name: String?
     public var sessions: [SessionInfo]?
+    public var inputAcknowledgements: Bool?
     public var canCreate: Bool?
     public var message: String?
     public init(_ type: String, sessionID: String? = nil) { self.type = type; self.sessionID = sessionID }

@@ -87,4 +87,16 @@ Shared UI, accessibility and error translations live in `packages/AFKCore/Source
 
 ## Distribution
 
-GitHub Actions workflows prepare relay images in GHCR, signed/notarized macOS releases, Homebrew tap updates and internal TestFlight uploads. See [publishing and required credentials](docs/publishing.md). The personal relay beta `v0.1.0-rc.1` is published and deployed on Helena. See [local delivery and test evidence](docs/local-delivery.md); Apple signing and TestFlight remain pending.
+Download the signed, notarized universal Mac DMG from [GitHub Releases](https://github.com/JesusPaz/afk/releases), open it and drag AFK to Applications. Beta releases also include a ZIP.
+
+Install the preview with Homebrew:
+
+```sh
+brew install --cask JesusPaz/tap/afk@preview
+```
+
+Update it with `brew upgrade --cask afk@preview`. If you already installed AFK manually, quit it and move the old app out of Applications before switching to Homebrew. Quitting AFK ends its shell sessions.
+
+iPhone builds are distributed through the existing internal TestFlight group. Live dictation with delivery confirmation requires the updated app on both devices; see [dictation behavior and validation](docs/dictation.md).
+
+See [publishing and required credentials](docs/publishing.md) for release, signing and tap maintenance, and [local delivery history](docs/local-delivery.md).

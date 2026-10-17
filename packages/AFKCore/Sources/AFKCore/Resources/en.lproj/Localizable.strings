@@ -267,3 +267,8 @@
 "Escanéalo con AFK o copia la invitación y pégala en el iPhone." = "Scan it with AFK, or copy and paste the invitation on your iPhone.";
 
 "Escanea el QR que aparece en tu Mac." = "Scan the QR displayed on your Mac.";
+
+"La entrada es demasiado grande. Se detuvo el envío; revisa la terminal antes de continuar." = "Input is too large. Sending stopped; check the terminal before continuing.";
+"El Mac no confirmó la entrada. Revisa la terminal antes de continuar." = "The Mac did not confirm input. Check the terminal before continuing.";
+"Actualiza AFK en el Mac para escribir con confirmación de entrega." = "Update AFK on your Mac to type with delivery confirmation.";
+"Hay entrada sin confirmar. Revisa la terminal antes de volver a escribir." = "Some input is unconfirmed. Check the terminal before typing again.";

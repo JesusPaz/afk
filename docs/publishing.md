@@ -1,8 +1,8 @@
 # Publishing AFK
 
-Updated 2026-10-16: the relay beta is released and deployed from local builds; see
-[delivery evidence](local-delivery.md) for current Mac signing/notarization status.
-TestFlight and Homebrew remain pending. Tracks [MVP #3](https://github.com/JesusPaz/afk/issues/3).
+Updated 2026-10-17: Mac and internal TestFlight betas are distributed from local
+builds. Mac releases include a notarized DMG and a Homebrew preview cask; see
+[delivery evidence](local-delivery.md) for signing and release history. Tracks [MVP #3](https://github.com/JesusPaz/afk/issues/3).
 Owner for activation and all external prerequisites: **JesusPaz**.
 
 Testa (`~/personal/cefalea-app`, GitHub `JesusPaz/testa`) is the workflow reference:
@@ -16,7 +16,7 @@ App ID, provisioning profile and build numbers must not be reused for AFK.
 | --- | --- | --- |
 | CI | PR, main push, reusable call | Go race + PostgreSQL, vet, Swift tests, both app builds, packaging tests, Docker build |
 | Publish relay candidate | Manual, chosen branch/commit | After CI, pushes `ghcr.io/jesuspaz/afk-relay:sha-<full commit>` for amd64/arm64; uploads exact digest |
-| Release | Manual on main, explicit `vX.Y.Z` or `vX.Y.Z-rc.N` | CI → signed/notarized universal Mac ZIP → versioned relay image → annotated tag at tested SHA → GitHub Release → Homebrew PR |
+| Release | Manual on main, explicit `vX.Y.Z` or `vX.Y.Z-rc.N` | CI → signed/notarized universal Mac DMG + ZIP → versioned relay image → annotated tag at tested SHA → GitHub Release → Homebrew PR |
 | TestFlight internal | Manual, chosen branch/commit + version label | CI → signed iOS archive → internal-only upload; no Git tag or public App Review |
 | Homebrew update | Called after release, or manual retry | Downloads release cask and opens a PR in your configured tap; never auto-merges |
 
@@ -29,9 +29,10 @@ The same selected commit flows through all reusable workflows. Publication is
 invoked directly: it does not depend on a tag pushed with `GITHUB_TOKEN` triggering
 another workflow (GitHub suppresses that recursive trigger).
 
-Mac artifacts: `AFK-v<version>-macOS.zip`, `SHA256SUMS`, `relay-image.txt`, and
-`afk.rb` / `afk@preview.rb`. The ZIP contains a Developer ID-signed, stapled app for
-both Apple Silicon and Intel. Homebrew verifies its SHA-256 and requires macOS 14+.
+Mac artifacts: `AFK-v<version>-macOS.dmg`, `AFK-v<version>-macOS.zip`, `SHA256SUMS`, `relay-image.txt`, and
+`afk.rb` / `afk@preview.rb`. Both containers hold the Developer ID-signed, stapled app for Apple Silicon and
+Intel. The DMG includes an Applications shortcut for drag-and-drop installation.
+Homebrew downloads the DMG, verifies its SHA-256 and requires macOS 14+.
 No unsigned fallback and no `sha256 :no_check`.
 
 ## GitHub and Apple setup
@@ -104,7 +105,12 @@ Keychain profile; exporting the signing key to GitHub is not required. Do not ru
    ID; inspect status/logs and wait for **Accepted**, never infer success from upload.
 5. Run `xcrun stapler staple <app>`, `xcrun stapler validate <app>` and
    `spctl --assess --type execute <app>`. Recreate the distribution ZIP after stapling,
-   calculate SHA-256 and publish those exact bytes to the release at the tested SHA.
+   then create the DMG with `bash scripts/release/dmg.sh <app> <output.dmg>`.
+6. Sign the DMG with the same Developer ID identity and a secure timestamp, submit
+   it to notarytool, wait for Accepted, and staple/validate its ticket. Verify both
+   the app and DMG with Gatekeeper. Calculate SHA-256 after stapling and publish
+   those exact bytes to the release at the tested SHA. Generate the cask with
+   `python3 scripts/release/cask.py <tag> <dmg> <afk@preview.rb>`.
 
 Keychain can require the Mac user's local approval when codesign accesses the
 private key. Do not reset the keychain or change its access controls to avoid that
@@ -159,7 +165,7 @@ missing signing configuration; it also checks HTTPS `/readyz` before signing.
    `v0.1.0-rc.1` and test the store-signed iPhone build.
 6. Run **Release** on main for `v0.1.0-rc.1` to publish the notarized Mac and versioned
    relay. Review/merge the Homebrew tap PR; install with
-   `brew install --cask JesusPaz/tap/afk@preview` if that is the chosen tap.
+   `brew install --cask JesusPaz/tap/afk@preview` from the public `JesusPaz/homebrew-tap` repository.
 7. When ready for stable, publish `v0.1.0`, review the `afk` cask PR and remove the
    preview cask before installing stable. The two casks conflict intentionally.
 

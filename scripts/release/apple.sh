@@ -90,8 +90,16 @@ if [[ "$mode" == mac ]]; then
     spctl --assess --type execute "$app"
     mkdir -p dist
     ditto -c -k --keepParent "$app" "dist/AFK-$RELEASE_TAG-macOS.zip"
-    (cd dist && shasum -a 256 "AFK-$RELEASE_TAG-macOS.zip" > SHA256SUMS)
+    dmg="dist/AFK-$RELEASE_TAG-macOS.dmg"
+    bash scripts/release/dmg.sh "$app" "$dmg"
+    codesign --sign 'Developer ID Application' --keychain "$keychain" --timestamp "$dmg"
+    xcrun notarytool submit "$dmg" --key "$work/AuthKey.p8" \
+        --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait --output-format json > "$work/dmg-notary.json"
+    python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "Accepted", "DMG notarization rejected"' "$work/dmg-notary.json"
+    xcrun stapler staple "$dmg"
+    xcrun stapler validate "$dmg"
+    (cd dist && shasum -a 256 "AFK-$RELEASE_TAG-macOS.zip" "AFK-$RELEASE_TAG-macOS.dmg" > SHA256SUMS)
     token=afk
     [[ "$RELEASE_TAG" != *-rc.* ]] || token=afk@preview
-    python3 scripts/release/cask.py "$RELEASE_TAG" "dist/AFK-$RELEASE_TAG-macOS.zip" "dist/$token.rb"
+    python3 scripts/release/cask.py "$RELEASE_TAG" "$dmg" "dist/$token.rb"
 fi

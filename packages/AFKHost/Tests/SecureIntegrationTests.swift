@@ -57,12 +57,69 @@ import Security
         try await until { session.lease.owner == saved.credentials.clientID }
         var input = Message("input", sessionID: session.id)
         input.epoch = session.lease.epoch; input.sequence = 1
-        input.data = Data("printf 'AFK_SECURE_%s\\n' OK\n".utf8).base64EncodedString()
+        input.data = Data("stty echo; printf 'AFK_SECURE_%s\\n' OK\n".utf8).base64EncodedString()
         phone.send(input)
         try await until {
             let output = received.filter { $0.type == "output" }.compactMap { $0.data.flatMap { Data(base64Encoded: $0) } }.reduce(Data(), +)
             return String(decoding: output, as: UTF8.self).contains("AFK_SECURE_OK")
         }
+        // Stream partial dictation and repeated synchronous UIKit-style corrections
+        // through the real encrypted relay and PTY, before submitting the command.
+        received = []
+        var dictationSequence: UInt64 = 1
+        var dictationPackets = 0
+        var dropNextInput = false
+        var dropNextAcknowledgement = false
+        let dictation = TerminalInputBuffer(send: { bytes, retry in
+            if retry == nil { dictationSequence += 1 }; dictationPackets += 1
+            var edit = Message("input", sessionID: session.id)
+            edit.epoch = session.lease.epoch; edit.sequence = retry ?? dictationSequence
+            edit.data = bytes.base64EncodedString()
+            if dropNextInput { dropNextInput = false } else { phone.send(edit) }
+            return edit.sequence
+        }, failed: { XCTFail("Dictation delivery timed out") })
+        phone.onMessage = { message in
+            received.append(message)
+            if message.type == "inputAck", let sequence = message.sequence {
+                if dropNextAcknowledgement { dropNextAcknowledgement = false }
+                else { dictation.acknowledge(sequence) }
+            }
+        }
+        defer { dictation.cancel() }
+        func output() -> String {
+            String(decoding: received.filter { $0.type == "output" }
+                .compactMap { $0.data.flatMap { Data(base64Encoded: $0) } }.reduce(Data(), +), as: UTF8.self)
+        }
+        let hypothesis = String(repeating: "x", count: 64)
+        XCTAssertTrue(dictation.append(Data(("printf 'AFK_DICTATION_%s\\n' " + hypothesis).utf8)))
+        try await until { output().contains(String(repeating: "x", count: 8)) }
+        for round in 0..<20 {
+            for _ in 0..<64 { XCTAssertTrue(dictation.append(Data([0x7f]))) }
+            XCTAssertTrue(dictation.append(Data(String(repeating: round % 2 == 0 ? "y" : "x", count: 64).utf8)))
+            try await Task.sleep(for: .milliseconds(16))
+        }
+        for _ in 0..<64 { XCTAssertTrue(dictation.append(Data([0x7f]))) }
+        XCTAssertTrue(dictation.append(Data("OK\n".utf8)))
+        do { try await until { output().contains("AFK_DICTATION_OK") } }
+        catch {
+            print("Dictation diagnostic: packets=\(dictationPackets), connected=\(phone.status == L10n.text("Conectado")), running=\(session.running), owned=\(session.lease.owner == saved.credentials.clientID), messages=\(Dictionary(grouping: received, by: \.type).mapValues { $0.count })")
+            throw error
+        }
+        XCTAssertLessThanOrEqual(dictationPackets, 22)
+        XCTAssertEqual(session.lease.owner, saved.credentials.clientID)
+        XCTAssertTrue(session.running)
+        try await until { !dictation.hasPendingInput }
+        received = []; dropNextAcknowledgement = true
+        let beforeLostAck = dictationPackets
+        dictation.append(Data("printf 'AFK_ONCE_%s\\n' OK\n".utf8))
+        try await until { dictationPackets == beforeLostAck + 2 && !dictation.hasPendingInput }
+        XCTAssertEqual(output().components(separatedBy: "AFK_ONCE_OK").count - 1, 1,
+                       "Lost ACK must not execute the command twice")
+        received = []; dropNextInput = true
+        let beforeLostInput = dictationPackets
+        dictation.append(Data("printf 'AFK_RETRY_%s\\n' OK\n".utf8))
+        try await until { output().contains("AFK_RETRY_OK") && !dictation.hasPendingInput }
+        XCTAssertEqual(dictationPackets, beforeLostInput + 2)
         // A second device cannot reuse the consumed invitation.
         let intruderAccount = "secure-test-\(UUID().uuidString)"; testAccounts.append(intruderAccount)
         let intruder = SecurePhoneRelay(account: intruderAccount)
