@@ -9,33 +9,15 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: afk-testflight
+  group: afk-apple-delivery
   cancel-in-progress: false
 jobs:
   checks:
     uses: ./.github/workflows/ci.yml
   upload:
     needs: checks
-    runs-on: macos-15
-    timeout-minutes: 60
-    environment: testflight
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      AFK_RELAY_URL: ${{ vars.AFK_RELAY_URL }}
-      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-      P12_BASE64: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
-      P12_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-      IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
-      ASC_KEY_ID: ${{ vars.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
-      ASC_KEY_BASE64: ${{ secrets.ASC_KEY_BASE64 }}
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - run: python3 scripts/release/preflight.py ios --check-relay
-      - run: sudo xcode-select -s /Applications/Xcode_26.3.app
-      - run: xcodebuild -downloadComponent MetalToolchain
-      - run: ./scripts/release/apple.sh ios
-      - name: Summary
-        run: echo 'Uploaded an internal-only build. Wait for Apple processing and assign it to an internal TestFlight group.' >> "$GITHUB_STEP_SUMMARY"
+    uses: ./.github/workflows/apple.yml
+    with:
+      tag: ${{ inputs.tag }}
+      platform: ios
+    secrets: inherit

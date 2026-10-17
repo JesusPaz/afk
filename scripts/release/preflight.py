@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import sys
 from urllib.parse import urlparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from version import parse
 
 mode = sys.argv[1]
@@ -36,7 +36,8 @@ if not any(item.get('idiom') == idiom and item.get('filename') and (catalog / it
     sys.exit(f'Missing {idiom} AppIcon images.')
 if '--check-relay' in sys.argv:
     try:
-        with urlopen(os.environ['AFK_RELAY_URL'].rstrip('/') + '/readyz', timeout=15) as response:
+        request = Request(os.environ['AFK_RELAY_URL'].rstrip('/') + '/readyz', headers={'User-Agent': 'AFK-Release/1.0'})
+        with urlopen(request, timeout=15) as response:
             if response.status != 200 or json.load(response).get('ready') is not True:
                 sys.exit('Relay readiness failed.')
     except Exception:

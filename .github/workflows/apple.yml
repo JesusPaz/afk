@@ -1,0 +1,39 @@
+name: Apple builds on EAS
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      platform:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: release
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm install --global eas-cli@25.1.1
+      - name: Build and distribute through EAS
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_PLATFORM: ${{ inputs.platform }}
+        run: |
+          test -n "$EXPO_TOKEN"
+          python3 scripts/release/eas-delivery.py "$RELEASE_TAG" "$RELEASE_PLATFORM"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.platform == 'all'
+        with:
+          name: mac-release
+          path: dist/
+          if-no-files-found: error

@@ -1,0 +1,46 @@
+name: Apple distribution
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        required: true
+      build:
+        type: string
+        required: true
+      commit:
+        type: string
+        required: true
+      platform:
+        type: choice
+        options: [all, ios, mac]
+        default: all
+jobs:
+  mac:
+    if: ${{ inputs.platform != 'ios' }}
+    runs_on: macos-medium
+    image: macos-tahoe-26.6-xcode-27.0
+    environment: production
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      AFK_BUILD_NUMBER: ${{ inputs.build }}
+      AFK_SOURCE_COMMIT: ${{ inputs.commit }}
+    steps:
+      - uses: eas/checkout
+      - run: bash scripts/release/eas-apple.sh mac
+      - uses: eas/upload_artifact
+        with:
+          name: mac-release
+          path: dist/*
+  ios:
+    if: ${{ inputs.platform != 'mac' }}
+    runs_on: macos-medium
+    image: macos-tahoe-26.6-xcode-27.0
+    environment: production
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      AFK_BUILD_NUMBER: ${{ inputs.build }}
+      AFK_SOURCE_COMMIT: ${{ inputs.commit }}
+    steps:
+      - uses: eas/checkout
+      - run: bash scripts/release/eas-apple.sh ios
