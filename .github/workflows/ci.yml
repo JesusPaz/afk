@@ -56,3 +56,5 @@ jobs:
       - run: xcodebuild -downloadComponent MetalToolchain
       - run: xcodebuild -project apps/apple/AFK.xcodeproj -scheme AFKMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation
       - run: xcodebuild -project apps/apple/AFK.xcodeproj -scheme AFKiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation
+      - name: Test automatic history scrolling on iPhone
+        run: xcodebuild -project apps/apple/AFK.xcodeproj -scheme AFKiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:AFKiOSTests/PhoneHistoryScrollTests CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- -skipPackagePluginValidation test

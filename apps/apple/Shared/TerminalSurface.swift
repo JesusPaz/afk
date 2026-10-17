@@ -47,9 +47,7 @@ final class TerminalContainer: PlatformView {
         cell = CGSize(width: terminal.getOptimalFrameSize().width - first.width, height: first.height / 24)
         extraWidth = first.width - 80 * cell.width
         terminal.resize(cols: 80, rows: 24)
-        #if os(macOS)
         terminal.getTerminal().changeScrollback(10_000)
-        #endif
         addSubview(scroll)
         #if os(macOS)
         scroll.drawsBackground = false
@@ -134,6 +132,7 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
     private var replaying = false
     private var attaching = false
     var active = true
+    private var presentationStart: UInt64?
     private var proposed: TerminalSize?
     private var pending: DispatchWorkItem?
     init(feed: TerminalFeed, editable: Bool, input: @escaping (Data) -> Void, resize: @escaping (TerminalSize) -> Void) {
@@ -142,6 +141,10 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
     func attach(_ container: TerminalContainer) {
         let view = container.terminal
         view.terminalDelegate = self
+        #if os(iOS)
+        view.alwaysBounceVertical = true
+        view.panGestureRecognizer.addTarget(self, action: #selector(historyPan(_:)))
+        #endif
         container.viewportChanged = { [weak self] size in
             guard let self, size != self.proposed else { return }
             self.proposed = size; self.pending?.cancel()
@@ -151,14 +154,11 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
         }
         attaching = true
         defer { attaching = false }
-        #if os(macOS)
         let restoreHistory = true
-        #else
-        let restoreHistory = false
-        #endif
         observation = feed.observe(replayHistory: restoreHistory) { [weak self, weak container] events, reset in
             guard let self, let container else { return }
             let view = container.terminal
+            let previousTop = self.presentationStart.map { $0 + UInt64(max(0, view.getTerminal().buffer.yDisp)) }
             self.replaying = reset
             if reset {
                 view.getTerminal().resetToInitialState()
@@ -170,6 +170,11 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
                 }
                 if let data = event.data { view.feed(byteArray: Array(data)[...]) }
             }
+            if let start = self.feed.presentationStart {
+                self.presentationStart = start
+                if self.feed.followingPresentation { view.scroll(toPosition: 1) }
+                else if let previousTop { view.scrollTo(row: Int(previousTop > start ? previousTop - start : 0)) }
+            }
             self.replaying = false
         }
     }
@@ -178,7 +183,21 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
     func setTerminalTitle(source: TerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-    func scrolled(source: TerminalView, position: Double) {}
+    func scrolled(source: TerminalView, position: Double) {
+        guard !replaying, !attaching, feed.presentationStart != nil else { return }
+        if position <= 0.15 { feed.onHistoryEdge?(true) }
+        else if position >= 0.85 { feed.onHistoryEdge?(false) }
+    }
+    #if os(iOS)
+    @objc func historyPan(_ gesture: UIPanGestureRecognizer) {
+        guard !replaying, !attaching, gesture.state == .changed,
+              let view = gesture.view as? TerminalView, feed.presentationStart != nil else { return }
+        let motion = gesture.translation(in: view)
+        guard abs(motion.y) > abs(motion.x), abs(motion.y) > 12 else { return }
+        if motion.y > 0 && view.contentOffset.y < 40 { feed.onHistoryEdge?(true) }
+        if motion.y < 0 && view.contentOffset.y + view.bounds.height >= view.contentSize.height - 40 { feed.onHistoryEdge?(false) }
+    }
+    #endif
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
     func clipboardCopy(source: TerminalView, content: Data) {}
     func clipboardRead(source: TerminalView) -> Data? { nil }

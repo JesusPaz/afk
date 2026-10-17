@@ -95,8 +95,11 @@ Apple, SwiftTerm, NIO/BoringSSL and shell programs remain part of the trusted ba
 Network replay is bounded in RAM. The Mac app also persists complete terminal output
 and geometry in owner-only local session recordings until the user explicitly deletes
 them. This intentionally includes any secrets printed by a shell; AFK does not apply
-additional at-rest encryption. Recordings are never uploaded to the relay and playback
-cannot send input to a shell. OS crash reports, swap, backups and shell history are separate.
+additional at-rest encryption. Rendered screens and requested history pages are sent only inside the authenticated
+encrypted device transport; the relay cannot read them. The iPhone retains a bounded
+window in memory, cleared on leave, disconnect, backgrounding or permission removal.
+The disk row index on the Mac has the same owner-only permissions as its recording.
+Browsing history cannot send input to a shell. OS crash reports, swap, backups and shell history are separate.
 No secure memory-erasure guarantee is made.
 
 Identity certificates expire after five years and fail closed. Automatic key

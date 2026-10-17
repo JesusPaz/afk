@@ -204,6 +204,7 @@ struct PhoneTerminal: View {
                 Label(model.terminalStatus, systemImage: model.canWrite ? "keyboard" : "eye")
                     .font(.subheadline.weight(.medium))
                 if let notice = model.sessionNotice { InlineNotice(text: notice) }
+                if model.loadingHistory { ProgressView() }
                 if let expiry = model.selectedInfo?.controlExpiresAt {
                     Text(L10n.text("Control autorizado hasta") + " " + expiry.formatted(date: .omitted, time: .shortened)).font(.caption)
                 } else if model.ready { Text(L10n.text("Solo lectura. Autoriza el control desde el Mac.")).font(.caption) }

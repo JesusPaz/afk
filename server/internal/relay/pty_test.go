@@ -22,6 +22,7 @@ func TestRealSecureSwiftPTY(t *testing.T) {
 		"testSecurePairingRealPTYReconnectAndRevocation",
 		"testConsentCancellationConcurrencyAndPhonePersistence",
 		"testAllSessionCommandsRejectedWhilePending",
+		"testHistoryRequestRejectedWhilePending",
 	} {
 		t.Run(scenario, func(t *testing.T) { runSecureSwift(t, scenario) })
 	}

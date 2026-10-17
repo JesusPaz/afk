@@ -188,3 +188,40 @@ and iPhone 13 Pro; automated TLS tests do not prove Face ID behavior.
 Apple references: [Secure Enclave keys](https://developer.apple.com/documentation/security/protecting-keys-with-the-secure-enclave),
 [current biometric enrollment](https://developer.apple.com/documentation/security/secaccesscontrolcreateflags/biometrycurrentset),
 [App Attest’s separate integrity checks](https://developer.apple.com/documentation/devicecheck/establishing-your-app-s-integrity).
+
+## Current screen and on-demand history
+
+An updated phone sends `attach` with a fresh UUID `viewportID`. The Mac serializes a
+`TerminalViewport` containing only the current rendered rows, geometry, cursor,
+application-cursor / bracketed-paste / enhanced-keyboard modes, history row count and
+output sequence. No historical page is fetched by attachment.
+
+`viewport` messages carry successive base64 portions (24 KiB raw) of that JSON state,
+with `viewportID`, `sequence`, `historyOffset`, `historyLength` and `historyComplete`.
+The phone validates a contiguous offset and a maximum 8 MiB frame, then acknowledges
+with `viewportNext`. It renders only complete frames. At most one immutable frame is
+in flight per phone; newer output coalesces until its acknowledgement. ACKs are paced
+at 20 ms to respect relay frame/byte budgets even on a fast LAN. Input delivery keeps
+its existing independent epoch/sequence/acknowledgement protocol.
+
+On a backward scroll, `historyPage` supplies `viewportID`, a fresh `requestID` and an
+exclusive `historyBefore` row. A forward scroll instead supplies inclusive
+`historyStart`. The reply echoes both IDs and returns `[historyStart, historyBefore)`
+plus `historyRows`. Rows and index offsets stay on disk on the Mac. Each page is
+bounded to 64 rows / 64 KiB, including colored output. The phone requests one page
+at a time, paced at 100 ms, and retains at most 256 old rows. Visible-row anchoring
+prevents prepends and live output from moving the reader's position. Taking control
+explicitly returns to the live screen. Disconnect, backgrounding, session switching
+and permission withdrawal clear the phone's cache and pending requests.
+
+Every request is authorized against the current session grant. Transfer/request IDs
+prevent stale responses from populating another session. Terminal query responses
+computed by the Mac emulator go only to the current controller as `terminalResponse`;
+the phone returns them through the normal sequenced input authority. Drawing a frame
+or browsing history never replays recorded commands or terminal query responses.
+
+Absent `viewportID`, bounded legacy snapshot behavior is retained. Update both apps
+for this protocol. No production relay changes are needed: all fields remain inside
+mutually authenticated TLS. Current frames render text and ANSI cell styles; terminal
+image protocols and in-application mouse reporting are outside this view protocol.
+The full original ANSI/geometry recording remains on the Mac.

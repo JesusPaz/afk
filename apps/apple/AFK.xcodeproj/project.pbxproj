@@ -12,34 +12,46 @@
 		351F0487D5C08C42C5DCD08D /* AFKStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 698C80A5D33B4AF366CD17E2 /* AFKStyle.swift */; };
 		3AE22E2270778D2B5A21E104 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2936EED41201275C4F3F7A9C /* Assets.xcassets */; };
 		3EB11E15CE4653AB6ABF9676 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 297527FDAE95DA286547CF13 /* PrivacyInfo.xcprivacy */; };
+		484CA0C1868293207CA9CB6D /* AFKCore in Frameworks */ = {isa = PBXBuildFile; productRef = E0C5707EAE57110C1F97AC75 /* AFKCore */; };
 		4B0CBB103490E1FB957AC6FE /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 297527FDAE95DA286547CF13 /* PrivacyInfo.xcprivacy */; };
 		51B449514D199D847262FE34 /* AFKiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E6DB50FCA2DDBA2DD681F1E /* AFKiOSApp.swift */; };
+		6987DE6B8D9C9B64D431EC45 /* PhoneHistoryScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F936685B6CD830332D99BC13 /* PhoneHistoryScrollTests.swift */; };
 		6A4B53CA356E39A490089E47 /* AFKStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 698C80A5D33B4AF366CD17E2 /* AFKStyle.swift */; };
 		777B060D3748EDFB382083AE /* RemoteModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A042047838ADFF74D1C2190F /* RemoteModel.swift */; };
+		7B87A794DDB217236DD9FA45 /* AFKStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 698C80A5D33B4AF366CD17E2 /* AFKStyle.swift */; };
 		8B8C32B9A85509F6DBA1188F /* TerminalSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A449C7DA07D591BACF5EC9C /* TerminalSurface.swift */; };
+		90F4D6ADC99F73E00DAB5670 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 18C910C186FC101B34BB1270 /* SwiftTerm */; };
 		945BADE8018F4D6BB4954F8B /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 410EE7A8D1247B8977657820 /* SwiftTerm */; };
 		9619F9D975B8977348B3B39F /* AFKMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B0623D814CAE8F07A803060 /* AFKMacApp.swift */; };
+		A9B66D7AFF839806D31999E5 /* TerminalLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89360DF106C05327402362E2 /* TerminalLayoutTests.swift */; };
+		BBDFB960EDE85A2BE185226D /* RemoteModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A042047838ADFF74D1C2190F /* RemoteModel.swift */; };
 		BEE2505513229A0264F1FC3D /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 9CA756DCAEAD2439334A3CB0 /* InfoPlist.strings */; };
 		CCC96667C6CEB1438EC8A7CD /* AFKCore in Frameworks */ = {isa = PBXBuildFile; productRef = F708F1325225AC472C3E5027 /* AFKCore */; };
+		D6E974B50E2C88C6417433AA /* RemoteAccessModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 301D83775D53C12D40FC8F84 /* RemoteAccessModelTests.swift */; };
 		D7D2A340A0FB3DADEED13630 /* AFKCore in Frameworks */ = {isa = PBXBuildFile; productRef = 71CD64BA34A25A8960983F63 /* AFKCore */; };
 		DAD7322A8C497C552F0587DA /* AFKHost in Frameworks */ = {isa = PBXBuildFile; productRef = 77E64D94D0EE1B7E12461043 /* AFKHost */; };
 		DBE6511E051D7A38832C320E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2936EED41201275C4F3F7A9C /* Assets.xcassets */; };
 		E17632CE05859969690D54AE /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = E8637D12C0FF5B9B2E297EB7 /* SwiftTerm */; };
+		FEF457834C0FF10669FA775D /* TerminalSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A449C7DA07D591BACF5EC9C /* TerminalSurface.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		2936EED41201275C4F3F7A9C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		297527FDAE95DA286547CF13 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		301D83775D53C12D40FC8F84 /* RemoteAccessModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAccessModelTests.swift; sourceTree = "<group>"; };
 		3659A90D84B5D40561878665 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		3B0623D814CAE8F07A803060 /* AFKMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AFKMacApp.swift; sourceTree = "<group>"; };
 		6396319D54F8A29292B6DB77 /* AFKiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AFKiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		698C80A5D33B4AF366CD17E2 /* AFKStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AFKStyle.swift; sourceTree = "<group>"; };
 		6E6DB50FCA2DDBA2DD681F1E /* AFKiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AFKiOSApp.swift; sourceTree = "<group>"; };
+		82B5B78BEEC4EE98394CDA04 /* AFKiOSTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AFKiOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		89360DF106C05327402362E2 /* TerminalLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLayoutTests.swift; sourceTree = "<group>"; };
 		8A449C7DA07D591BACF5EC9C /* TerminalSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurface.swift; sourceTree = "<group>"; };
 		8BAB24EA52B5BA421B0939BA /* afk */ = {isa = PBXFileReference; lastKnownFileType = folder; name = afk; path = ../..; sourceTree = SOURCE_ROOT; };
 		A042047838ADFF74D1C2190F /* RemoteModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteModel.swift; sourceTree = "<group>"; };
 		D1D4FD9296786FA7ADAFD791 /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		D9C968A4CA3174B4C0121CA6 /* AFKMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AFKMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F936685B6CD830332D99BC13 /* PhoneHistoryScrollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneHistoryScrollTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,6 +74,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0B3C5F7A8DDE48A84B9378E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				484CA0C1868293207CA9CB6D /* AFKCore in Frameworks */,
+				90F4D6ADC99F73E00DAB5670 /* SwiftTerm in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -73,6 +94,7 @@
 				31DAB8CEDF86625AA7B83C66 /* Packages */,
 				E3CC794AD5069536088FB5AF /* Resources */,
 				992726789D69A3218C1C67B8 /* Shared */,
+				3EB0745D57E63E0E701CA264 /* Tests */,
 				91A963CE643336996E1D56DB /* Products */,
 			);
 			sourceTree = "<group>";
@@ -94,10 +116,21 @@
 			path = iOS;
 			sourceTree = "<group>";
 		};
+		3EB0745D57E63E0E701CA264 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				F936685B6CD830332D99BC13 /* PhoneHistoryScrollTests.swift */,
+				301D83775D53C12D40FC8F84 /* RemoteAccessModelTests.swift */,
+				89360DF106C05327402362E2 /* TerminalLayoutTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
 		91A963CE643336996E1D56DB /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				6396319D54F8A29292B6DB77 /* AFKiOS.app */,
+				82B5B78BEEC4EE98394CDA04 /* AFKiOSTests.xctest */,
 				D9C968A4CA3174B4C0121CA6 /* AFKMac.app */,
 			);
 			name = Products;
@@ -176,6 +209,26 @@
 			productReference = 6396319D54F8A29292B6DB77 /* AFKiOS.app */;
 			productType = "com.apple.product-type.application";
 		};
+		C36B151EE235EA17B0692C7B /* AFKiOSTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5DEFD6FF931EB1C7A83E6309 /* Build configuration list for PBXNativeTarget "AFKiOSTests" */;
+			buildPhases = (
+				065BDC3BD70C4D2DF1EE0979 /* Sources */,
+				D0B3C5F7A8DDE48A84B9378E /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AFKiOSTests;
+			packageProductDependencies = (
+				E0C5707EAE57110C1F97AC75 /* AFKCore */,
+				18C910C186FC101B34BB1270 /* SwiftTerm */,
+			);
+			productName = AFKiOSTests;
+			productReference = 82B5B78BEEC4EE98394CDA04 /* AFKiOSTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -208,6 +261,7 @@
 			targets = (
 				8CE9F8EA969522859C903A27 /* AFKMac */,
 				9C02A7AFD5450CDDBA369ACA /* AFKiOS */,
+				C36B151EE235EA17B0692C7B /* AFKiOSTests */,
 			);
 		};
 /* End PBXProject section */
@@ -236,6 +290,19 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		065BDC3BD70C4D2DF1EE0979 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7B87A794DDB217236DD9FA45 /* AFKStyle.swift in Sources */,
+				6987DE6B8D9C9B64D431EC45 /* PhoneHistoryScrollTests.swift in Sources */,
+				D6E974B50E2C88C6417433AA /* RemoteAccessModelTests.swift in Sources */,
+				BBDFB960EDE85A2BE185226D /* RemoteModel.swift in Sources */,
+				A9B66D7AFF839806D31999E5 /* TerminalLayoutTests.swift in Sources */,
+				FEF457834C0FF10669FA775D /* TerminalSurface.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5D21283D7C1E8DEA95B8EF41 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -441,6 +508,22 @@
 			};
 			name = Release;
 		};
+		5A2DE9C88FD5CB11B544B3CC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				INFOPLIST_FILE = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jesuspaz.afk.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		6FEF3168D4D9F4CDD80D9A52 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -477,9 +560,34 @@
 			};
 			name = Debug;
 		};
+		AD6B8E81A1D4F547A0B28BC2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				INFOPLIST_FILE = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jesuspaz.afk.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5DEFD6FF931EB1C7A83E6309 /* Build configuration list for PBXNativeTarget "AFKiOSTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5A2DE9C88FD5CB11B544B3CC /* Debug */,
+				AD6B8E81A1D4F547A0B28BC2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		845840AFD6B03F2BE992AB97 /* Build configuration list for PBXProject "AFK" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -528,6 +636,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		18C910C186FC101B34BB1270 /* SwiftTerm */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5C9DEBA58BCCBF73A38BF18B /* XCRemoteSwiftPackageReference "SwiftTerm" */;
+			productName = SwiftTerm;
+		};
 		410EE7A8D1247B8977657820 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5C9DEBA58BCCBF73A38BF18B /* XCRemoteSwiftPackageReference "SwiftTerm" */;
@@ -540,6 +653,10 @@
 		77E64D94D0EE1B7E12461043 /* AFKHost */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AFKHost;
+		};
+		E0C5707EAE57110C1F97AC75 /* AFKCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AFKCore;
 		};
 		E8637D12C0FF5B9B2E297EB7 /* SwiftTerm */ = {
 			isa = XCSwiftPackageProductDependency;

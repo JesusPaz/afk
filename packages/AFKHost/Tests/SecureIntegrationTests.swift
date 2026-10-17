@@ -7,7 +7,9 @@ import Security
 @MainActor final class SecureIntegrationTests: XCTestCase {
     func testSecurePairingRealPTYReconnectAndRevocation() async throws {
         guard let server = ProcessInfo.processInfo.environment["AFK_E2EE_TEST_URL"] else { throw XCTSkip("requires the local v2 relay and PostgreSQL") }
-        let host = HostController(preferences: UserDefaults(suiteName: "AFK-secure-tests")!)
+        let historyRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: historyRoot) }
+        let host = HostController(preferences: UserDefaults(suiteName: "AFK-secure-tests")!, historyDirectory: historyRoot)
         let credentials = try HostSecret(id: ProcessInfo.processInfo.environment["AFK_E2EE_HOST_ID"] ?? UUID().uuidString, token: SecretStore.randomToken())
         let account = "secure-test-\(UUID().uuidString)"
         let phone = SecurePhoneRelay(account: account, persist: { try SecretStore.write($0, account: account) }, makeIdentity: { _ in try DeviceIdentity.createSecureEnclave() })
@@ -151,12 +153,53 @@ import Security
         second.send(resize)
         try await until { session.feed.size.columns == 91 }
         XCTAssertFalse(secondMessages.contains { $0.data.flatMap { Data(base64Encoded: $0) }.map { String(decoding: $0, as: UTF8.self).contains("FORBIDDEN_STALE_OWNER") } ?? false })
-        // Removing read access immediately stops future output, not only snapshots.
+        // Opening a long session transfers only its current state, not its full recording.
+        let block = Data(repeating: 65, count: 32 * 1024)
+        for _ in 0..<40 { session.feed.sequence += 1; session.feed.append(block) }
+        XCTAssertNil(session.feed.snapshot)
+        let transferID = UUID().uuidString
+        var frameData = Data(), frameSequence: UInt64?, snapshots: [TerminalViewport] = []
+        var pages: [Message] = []
+        phone.onMessage = { message in
+            received.append(message)
+            if message.type == "historyPage" { pages.append(message) }
+            guard message.type == "viewport", message.viewportID == transferID else { return }
+            if frameSequence != message.sequence { frameSequence = message.sequence; frameData = Data() }
+            frameData.append(Data(base64Encoded: message.data ?? "") ?? Data())
+            if message.historyComplete == true, let view = try? JSONDecoder().decode(TerminalViewport.self, from: frameData) {
+                snapshots.append(view)
+            }
+            var next = Message("viewportNext", sessionID: session.id)
+            next.viewportID = transferID; next.historyOffset = message.historyOffset; next.sequence = message.sequence
+            phone.send(next)
+        }
+        var attach = Message("attach", sessionID: session.id); attach.viewportID = transferID
+        phone.send(attach)
+        try await until { !snapshots.isEmpty }
+        XCTAssertLessThan(frameData.count, 16 * 1024)
+        XCTAssertTrue(pages.isEmpty, "Opening must not eagerly fetch history")
+        let view = try XCTUnwrap(snapshots.last)
+        XCTAssertGreaterThan(view.historyCount, 10_000)
+        var pageRequest = Message("historyPage", sessionID: session.id)
+        pageRequest.viewportID = transferID; pageRequest.requestID = UUID().uuidString
+        pageRequest.historyBefore = view.historyCount
+        phone.send(pageRequest)
+        try await until { !pages.isEmpty }
+        let firstPage = try XCTUnwrap(pages.last)
+        XCTAssertLessThanOrEqual(firstPage.historyRows?.count ?? 0, 64)
+        XCTAssertEqual(firstPage.historyBefore, view.historyCount)
+        // Removing read access immediately stops future output and further history pages.
         received = []
         host.setAccess(client: saved.credentials.clientID, session: session.id, level: .none)
         try await until { received.contains { $0.type == "sessions" && $0.sessions?.isEmpty == true } }
         // Earlier frames can already be in flight; the ordered permission update is the boundary.
         received = []
+        var forbiddenPage = Message("historyPage", sessionID: session.id)
+        forbiddenPage.viewportID = transferID; forbiddenPage.requestID = UUID().uuidString
+        forbiddenPage.historyBefore = firstPage.historyStart
+        phone.send(forbiddenPage)
+        try await until { received.contains { $0.type == "error" } }
+        XCTAssertFalse(received.contains { $0.type == "historyPage" })
         var afterRemoval = Message("input", sessionID: session.id)
         afterRemoval.epoch = session.lease.epoch; afterRemoval.sequence = 2
         afterRemoval.data = Data("printf POST_REMOVAL_MARKER\n".utf8).base64EncodedString()
@@ -214,6 +257,11 @@ import Security
     }
     func testAllSessionCommandsRejectedWhilePending() async throws {
         try await withTestHost { host, _ in try await rejectedPendingCommands(host: host) }
+    }
+    func testHistoryRequestRejectedWhilePending() async throws {
+        try await withTestHost { host, _ in
+            try await rejectedPendingCommands(host: host, commands: ["viewportNext", "historyPage"])
+        }
     }
     private func withTestHost(_ operation: (HostController, inout [String]) async throws -> Void) async throws {
         guard let server = ProcessInfo.processInfo.environment["AFK_E2EE_TEST_URL"] else { throw XCTSkip("requires the local v2 relay and PostgreSQL") }
@@ -293,8 +341,8 @@ import Security
         try host.relay.approvePairing(candidate.id)
         return try await task.value
     }
-    private func rejectedPendingCommands(host: HostController) async throws {
-        for command in ["list", "create", "attach", "input", "resize", "claim", "release", "renew", "terminate"] {
+    private func rejectedPendingCommands(host: HostController, commands: [String] = ["list", "create", "attach", "input", "resize", "claim", "release", "renew", "terminate"]) async throws {
+        for command in commands {
             await host.makePairing()
             let invitation = try SecureInvitation.decode(XCTUnwrap(host.pairing).secret)
             let id = UUID().uuidString, token = try SecretStore.randomToken(), identity = try DeviceIdentity.create()

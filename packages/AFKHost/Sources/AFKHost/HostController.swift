@@ -23,6 +23,14 @@ public final class HostController: ObservableObject {
     public private(set) var accessRevision: UInt64 = 0
     public let access: RemoteAccess
     @Published public private(set) var connectedClients: Set<String> = []
+    private struct ViewTransfer {
+        let id: String
+        let session: String
+        var data: Data?
+        var offset = 0
+        var sequence: UInt64 = 0
+    }
+    private var views: [String: ViewTransfer] = [:]
     private let history: AccessHistory
     public var accessEvents: [AccessEvent] { history.events }
     private let historyDirectory: URL?
@@ -51,6 +59,7 @@ public final class HostController: ObservableObject {
         relay.onMessage = { [weak self] in self?.receive($0) }
         relay.onDisconnect = { [weak self] in
             guard let self else { return }
+            self.views.removeAll()
             for session in self.sessions where session.lease.owner != "local" { session.release(session.lease.owner) }
         }
         statusSubscription = relay.$status.sink { [weak self] in self?.connectionStatus = $0 }
@@ -237,10 +246,16 @@ public final class HostController: ObservableObject {
     private func forward(_ message: Message) {
         guard let session = message.sessionID else { return }
         for client in connectedClients where access.level(client: client, session: session) != .none {
+            if message.type == "terminalResponse", message.owner != client { continue }
+            if let view = views[client], view.session == session, ["output", "resized"].contains(message.type) {
+                if view.data == nil, let hostSession = sessions.first(where: { $0.id == session }) { sendViewport(client: client, session: hostSession) }
+                continue
+            }
             var m = message; m.clientID = client; relay.send(m)
         }
     }
     private func deny(_ client: String, session: String? = nil) {
+        views.removeValue(forKey: client)
         record(.denied, client: client, session: session)
         sendError("El Mac no ha autorizado esta operación.", client: client)
         publishSessions(to: client)
@@ -248,12 +263,33 @@ public final class HostController: ObservableObject {
     private func sendError(_ text: String, client: String, session: String? = nil) {
         var m = Message("error", sessionID: session); m.clientID = client; m.message = text; relay.send(m)
     }
+    private func sendViewport(client: String, session: HostSession) {
+        do {
+            guard let screen = session.screen, screen.error == nil else { throw CocoaError(.fileReadUnknown) }
+            let data = try JSONEncoder().encode(screen.snapshot(sequence: session.feed.sequence))
+            guard data.count <= 8 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
+            views[client]?.data = data; views[client]?.offset = 0; views[client]?.sequence = session.feed.sequence
+            sendViewportPart(client: client)
+        } catch { sendError("No se pudo leer el historial completo del Mac.", client: client, session: session.id) }
+    }
+    private func sendViewportPart(client: String) {
+        guard var view = views[client], let data = view.data,
+              let session = sessions.first(where: { $0.id == view.session }) else { return }
+        let end = min(data.count, view.offset + 24 * 1024)
+        var reply = Message("viewport", sessionID: view.session)
+        reply.viewportID = view.id; reply.clientID = client; reply.sequence = view.sequence
+        reply.data = data.subdata(in: view.offset..<end).base64EncodedString()
+        reply.historyOffset = UInt64(end); reply.historyLength = UInt64(data.count); reply.historyComplete = end == data.count
+        reply.owner = session.lease.owner; reply.epoch = session.lease.epoch; reply.inputAcknowledgements = true
+        view.offset = end; views[client] = view
+        relay.send(reply)
+    }
     func receive(_ m: Message) {
         guard let client = m.clientID else { return }
         if m.type == "clientConnected" {
             connectedClients.insert(client); clients = relay.clients; record(.connected, client: client); publishSessions(to: client); return
         }
-        if m.type == "clientDisconnected" { connectedClients.remove(client); releaseControl(client); record(.disconnected, client: client); return }
+        if m.type == "clientDisconnected" { views.removeValue(forKey: client); connectedClients.remove(client); releaseControl(client); record(.disconnected, client: client); return }
         guard connectedClients.contains(client) else { return }
         tick()
         if m.type == "list" { publishSessions(to: client); return }
@@ -268,7 +304,37 @@ public final class HostController: ObservableObject {
         if ["claim", "renew", "input", "resize"].contains(m.type), access.level(client: client, session: session.id) != .control { deny(client, session: session.id); return }
         if m.type == "terminate", !access.canClose(client: client, session: session.id) { deny(client, session: session.id); return }
         switch m.type {
+        case "viewportNext":
+            guard let view = views[client], view.session == session.id, view.id == m.viewportID,
+                  view.sequence == m.sequence, UInt64(view.offset) == m.historyOffset else { return }
+            if let data = view.data, view.offset == data.count {
+                views[client]?.data = nil
+                if session.feed.sequence > view.sequence { sendViewport(client: client, session: session) }
+            } else { sendViewportPart(client: client) }
+        case "historyPage":
+            guard let view = views[client], view.session == session.id, view.id == m.viewportID,
+                  let request = m.requestID, UUID(uuidString: request) != nil else { return }
+            do {
+                guard let screen = session.screen, screen.error == nil else { throw CocoaError(.fileReadUnknown) }
+                let page: (start: UInt64, rows: [TerminalRow])
+                if let before = m.historyBefore { page = try screen.archive.page(before: before) }
+                else if let after = m.historyStart { page = try screen.archive.page(after: after) }
+                else { return }
+                var reply = Message("historyPage", sessionID: session.id)
+                reply.clientID = client; reply.viewportID = view.id; reply.requestID = request
+                reply.historyStart = page.start; reply.historyBefore = page.start + UInt64(page.rows.count); reply.historyRows = page.rows
+                relay.send(reply)
+            } catch { sendError("No se pudo leer el historial completo del Mac.", client: client, session: session.id) }
         case "attach":
+            views.removeValue(forKey: client)
+            if let id = m.viewportID {
+                guard UUID(uuidString: id) != nil else { return }
+                session.flushOutput()
+                views[client] = ViewTransfer(id: id, session: session.id)
+                record(.viewed, client: client, session: session.id)
+                sendViewport(client: client, session: session)
+                return
+            }
             session.flushOutput()
             record(.viewed, client: client, session: session.id)
             guard let bytes = session.feed.snapshot else {
