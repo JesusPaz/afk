@@ -1,13 +1,14 @@
 #!/bin/bash
 set -euo pipefail
-# Run on an ephemeral GitHub macOS runner; never on a developer's login keychain.
+# Run on an ephemeral macOS runner; never on a developer's login keychain.
 mode=${1:?mac or ios}
 [[ "$mode" == mac || "$mode" == ios ]] || exit 2
 : "${RUNNER_TEMP:?}" "${APPLE_TEAM_ID:?}" "${P12_BASE64:?}" "${P12_PASSWORD:?}"
 : "${ASC_KEY_ID:?}" "${ASC_ISSUER_ID:?}" "${ASC_KEY_BASE64:?}" "${RELEASE_TAG:?}" "${AFK_RELAY_URL:?}"
 python3 scripts/release/version.py "$RELEASE_TAG" > "$RUNNER_TEMP/afk-version"
 version=$(sed -n 's/^version=//p' "$RUNNER_TEMP/afk-version")
-build="${GITHUB_RUN_NUMBER:?}.${GITHUB_RUN_ATTEMPT:?}"
+build="${AFK_BUILD_NUMBER:-${GITHUB_RUN_NUMBER:-}.${GITHUB_RUN_ATTEMPT:-}}"
+[[ "$build" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || exit 2
 work=$(mktemp -d "$RUNNER_TEMP/afk-signing.XXXXXX")
 keychain="$work/signing.keychain-db"
 profile_path=""

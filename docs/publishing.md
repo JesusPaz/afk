@@ -1,14 +1,15 @@
 # Publishing AFK
 
-Updated 2026-10-17: Mac and internal TestFlight betas are distributed from local
-builds. Mac releases include a notarized DMG and a Homebrew preview cask; see
-[delivery evidence](local-delivery.md) for signing and release history. Tracks [MVP #3](https://github.com/JesusPaz/afk/issues/3).
-Owner for activation and all external prerequisites: **JesusPaz**.
+Updated 2026-10-17: GitHub orchestrates RC/stable releases and EAS runs both
+native Apple builds. Tracks [MVP #3](https://github.com/JesusPaz/afk/issues/3).
+Owner for credentials and distribution: **JesusPaz**.
 
-Testa (`~/personal/cefalea-app`, GitHub `JesusPaz/testa`) is the workflow reference:
-separate a deliberate release from internal TestFlight delivery. AFK uses native
-Xcode signing and upload instead of Testa's Expo/EAS credentials. Testa's app record,
-App ID, provisioning profile and build numbers must not be reused for AFK.
+Like Testa, AFK uses Expo's build service. AFK has its own EAS project
+[`@jesuspazs-team/afk`](https://expo.dev/accounts/jesuspazs-team/projects/afk).
+Custom macOS jobs run the existing Swift/Xcode projects directly: `app.json` and
+`package.json` identify the delivery project; they do not add an Expo runtime.
+The worker image is pinned to Xcode 27.0 and EAS CLI to 25.1.1 (older CLI 22.6.0
+fails to validate the current workflow schema).
 
 ## Workflows
 
@@ -16,8 +17,8 @@ App ID, provisioning profile and build numbers must not be reused for AFK.
 | --- | --- | --- |
 | CI | PR, main push, reusable call | Go race + PostgreSQL, vet, Swift tests, both app builds, packaging tests, Docker build |
 | Publish relay candidate | Manual, chosen branch/commit | After CI, pushes `ghcr.io/jesuspaz/afk-relay:sha-<full commit>` for amd64/arm64; uploads exact digest |
-| Release | Manual on main, explicit `vX.Y.Z` or `vX.Y.Z-rc.N` | CI → signed/notarized universal Mac DMG + ZIP → versioned relay image → annotated tag at tested SHA → GitHub Release → Homebrew PR |
-| TestFlight internal | Manual, chosen branch/commit + version label | CI → signed iOS archive → internal-only upload; no Git tag or public App Review |
+| Release | Manual on main, explicit `vX.Y.Z` or `vX.Y.Z-rc.N` | CI → EAS Mac DMG + ZIP and internal iOS upload → versioned relay image → annotated tag at tested SHA → GitHub Release → Homebrew PR |
+| TestFlight internal | Manual, chosen branch/commit + version label | CI → EAS signed iOS archive → internal-only upload; no Git tag or public App Review |
 | Homebrew update | Called after release, or manual retry | Downloads release cask and opens a PR in your configured tap; never auto-merges |
 
 Version input is explicit rather than calculated from commit messages. Start with
@@ -37,14 +38,19 @@ No unsigned fallback and no `sha256 :no_check`.
 
 ## GitHub and Apple setup
 
-Create GitHub environments `release`, `testflight`, and `homebrew`. Restrict
-`release`/`homebrew` to main and trusted release tags; only permit trusted branches
-in `testflight`. Add the variables/secrets below at repository or appropriate
-environment scope. There were no repository variables or secrets in AFK when checked.
+Create GitHub environments `release` and `homebrew`, restricted to trusted branches.
+Add `EXPO_TOKEN` as a GitHub secret. Both release and TestFlight use the same
+non-cancelling GitHub queue and the reusable `apple.yml` workflow.
+
+Store Apple values below in AFK's **EAS production environment**, at project scope.
+Use secret visibility for private keys, PKCS#12 passwords and provisioning profiles.
+Keep Homebrew variables/secrets in GitHub. Never print secret values or attach them
+to a release. Uploading existing signing identities to EAS requires the owner's
+explicit authorization; do not revoke or replace Testa's credentials.
 
 | Name | Kind | Used by |
 | --- | --- | --- |
-| `APPLE_TEAM_ID` | Variable | Both Apple workflows; your existing paid Apple Developer team |
+| `APPLE_TEAM_ID` | Variable | EAS Apple jobs; existing paid Apple Developer team |
 | `AFK_RELAY_URL` | Variable | Both; proposed `https://afk.jesuspaz.com`, must be reachable before beta upload |
 | `ASC_KEY_ID`, `ASC_ISSUER_ID` | Variables | App Store Connect team API key, including notarization access |
 | `ASC_KEY_BASE64` | Secret | Base64 of the `.p8` team API key |
@@ -64,8 +70,8 @@ For Apple:
 1. Register AFK's explicit iOS bundle ID `com.jesuspaz.afk.ios` in the existing team.
 2. Create a new iOS App Store Connect app **AFK** with this bundle ID and a unique SKU.
 3. Export/import the distribution credentials above. Team certificates can be shared
-   across apps, but the iOS provisioning profile must be AFK's. Do not copy credentials
-   out of Testa's EAS setup or put them in Git or chat.
+   across apps, but the iOS provisioning profile must be AFK's. AFK must have its own provisioning profile. Shared team credentials require
+   explicit authorization before reuse; never put them in Git or chat.
 4. Set up an internal TestFlight group in AFK's app record. Upload success means Apple
    accepted the transfer; processing and adding the build to a tester group happen next.
 5. Confirm current Apple agreements and export-compliance answers. AFK now uses
@@ -143,10 +149,19 @@ review and assignment to the internal test group. Only invite testers Jesus name
 ## Build numbering and endpoint
 
 The tag supplies Apple's numeric marketing version (`v0.1.0-rc.2` → `0.1.0`).
-`github.run_number.github.run_attempt` supplies the build version; TestFlight has its
-own serial workflow queue. A rerun increments the attempt. Keep this workflow's
-identity/counter; when migrating from manual uploads or renaming it, verify the next
-build number exceeds the latest one in App Store Connect. Never reuse a build number.
+Both entry points allocate the build number from UTC minutes since 2020, split into
+Apple's `major.minor.patch` limits (four/two/two digits). This exceeds local builds
+1–7 and remains ordered across workflows. The shared queue prevents concurrent
+uploads; do not dispatch EAS directly in parallel. Each retry allocates a new number.
+Before retrying an interrupted upload, inspect the recorded EAS run and App Store
+Connect to see whether Apple already accepted it.
+
+The dispatcher exports **only tracked files at the tested commit**, uploads that
+clean snapshot to EAS, and records its original SHA in the job. Local `.env`,
+signing files and build directories are excluded. Both jobs consume that same
+snapshot. GitHub waits for both jobs, downloads only the four expected Mac files,
+and checks `SHA256SUMS` before publishing. iOS upload success still requires Apple
+processing, export-compliance review and internal group assignment afterward.
 
 `AFK_RELAY_URL` is embedded in Info.plist at archive time. Fresh installs use it;
 existing `relayURL` preferences remain intact. Debug builds still default to localhost.
@@ -161,7 +176,7 @@ missing signing configuration; it also checks HTTPS `/readyz` before signing.
    `afk-relay-publishing`), replace its proposed image with the real digest and configure
    Cloudflare Tunnel/DNS. Follow that repo's `infrastructure/afk-relay/README.md`.
 4. Verify HTTPS readiness **and** physical-device WebSocket pairing/control/revocation.
-5. Configure GitHub Apple variables/secrets, then run **TestFlight internal** for
+5. Configure EAS Apple variables/secrets and GitHub `EXPO_TOKEN`, then run **TestFlight internal** for
    `v0.1.0-rc.1` and test the store-signed iPhone build.
 6. Run **Release** on main for `v0.1.0-rc.1` to publish the notarized Mac and versioned
    relay. Review/merge the Homebrew tap PR; install with
