@@ -34,6 +34,8 @@ security unlock-keychain -p "$password" "$keychain"
 security import "$work/certificate.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
 security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+# Archive without distribution signing so Swift package tools do not inherit an app profile.
+# exportArchive applies the real distribution identity and app provisioning profile.
 args=(-project apps/apple/AFK.xcodeproj -configuration Release -archivePath "$work/AFK.xcarchive"
     -derivedDataPath "$work/build" -skipPackagePluginValidation
     "DEVELOPMENT_TEAM=$APPLE_TEAM_ID" "MARKETING_VERSION=$version" "CURRENT_PROJECT_VERSION=$build"
@@ -41,7 +43,7 @@ args=(-project apps/apple/AFK.xcodeproj -configuration Release -archivePath "$wo
 if [[ "$mode" == mac ]]; then
     xcodebuild "${args[@]}" -scheme AFKMac -destination 'generic/platform=macOS' \
         'ARCHS=arm64 x86_64' ONLY_ACTIVE_ARCH=NO ENABLE_HARDENED_RUNTIME=YES \
-        'CODE_SIGN_IDENTITY=Developer ID Application' archive
+        CODE_SIGN_IDENTITY=- archive
 else
     : "${IOS_PROFILE_BASE64:?}"
     python3 - <<'PY'
@@ -57,7 +59,7 @@ PY
     mkdir -p "$(dirname "$profile_path")"
     cp "$work/profile.mobileprovision" "$profile_path"
     xcodebuild "${args[@]}" -scheme AFKiOS -destination 'generic/platform=iOS' \
-        'CODE_SIGN_IDENTITY=Apple Distribution' "PROVISIONING_PROFILE_SPECIFIER=$profile" archive
+        CODE_SIGNING_ALLOWED=NO archive
 fi
 export APPLE_EXPORT_MODE="$mode"
 python3 - <<'PY'
