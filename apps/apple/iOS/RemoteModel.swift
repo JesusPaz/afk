@@ -7,6 +7,10 @@ final class RemoteModel: ObservableObject {
     let relay = SecurePhoneRelay()
     private let unlock = LocalDeviceUnlock()
     private var reconnecting = false
+    private var pairing = false
+    private var pairingGeneration = UUID()
+    @Published var comparisonCode: String?
+    private var pairingSubscription: AnyCancellable?
     let feed = TerminalFeed()
     @Published var sessions: [SessionInfo] = []
     @Published var selected: String?
@@ -39,6 +43,7 @@ final class RemoteModel: ObservableObject {
         relay.onDisconnect = { [weak self] in
             self?.clearTerminal(); self?.sessions = []; self?.canCreate = false; self?.hostAvailable = false
         }
+        pairingSubscription = relay.$comparisonCode.sink { [weak self] in self?.comparisonCode = $0 }
         subscription = relay.$status.sink { [weak self] in self?.status = $0 }
         renewal = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -54,16 +59,25 @@ final class RemoteModel: ObservableObject {
             }
         } catch { self.error = error.localizedDescription }
     }
+    func cancelPairing() {
+        pairingGeneration = UUID(); unlock.invalidate()
+        if pairing { relay.disconnect() }
+    }
     func pair(invitation: String) async {
+        guard !pairing else { return }
+        pairing = true; let generation = pairingGeneration
+        defer { pairing = false }
         do {
+            _ = try SecureInvitation.decode(invitation)
             try await unlock.require()
+            guard generation == pairingGeneration else { throw SecureError.disconnected }
             let saved = try await relay.pair(invitation: invitation)
             credentials = saved.credentials
             hostName = saved.credentials.host.name; linked = true; error = nil
         } catch { self.error = error.localizedDescription }
     }
     func reconnect() {
-        guard !unlock.isBusy, !reconnecting else { return }
+        guard !unlock.isBusy, !reconnecting, !pairing else { return }
         ready = false; reconnecting = true
         Task {
             defer { reconnecting = false }
@@ -78,7 +92,7 @@ final class RemoteModel: ObservableObject {
     func claim() { guard canClaim else { return }; relay.send(Message("claim", sessionID: selected)) }
     func release() { if canWrite { relay.send(Message("release", sessionID: selected)) }; owner = "" }
     func leave() { release(); selected = nil; ready = false }
-    func suspend() { unlock.invalidate(); release(); relay.disconnect(); ready = false; sessions = []; _ = feed.reset([], sequence: 0) }
+    func suspend() { cancelPairing(); unlock.invalidate(); release(); relay.disconnect(); ready = false; sessions = []; _ = feed.reset([], sequence: 0) }
     func resize(_ size: TerminalSize) {
         viewport = size
         sendSize()

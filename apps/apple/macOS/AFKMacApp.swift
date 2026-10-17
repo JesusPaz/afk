@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreImage.CIFilterBuiltins
 import AFKCore
 import AFKHost
 
@@ -161,7 +162,10 @@ private struct MacConnectionSheet: View {
     @State private var busy = false
     @State private var revokeID: String?
     @State private var revokeAll = false
-    @State private var copied: String?
+    @State private var copied = false
+    @State private var candidate: PairingCandidate?
+    @State private var approving = false
+    @State private var completed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -187,6 +191,11 @@ private struct MacConnectionSheet: View {
         }
         .frame(width: 540)
         .task(id: destination) { await prepare() }
+        .onReceive(host.relay.$candidate) { candidate = $0 }
+        .onDisappear { host.cancelPairing() }
+        .onChange(of: destination) { old, next in
+            if old == .pair && next != .pair { host.cancelPairing() }
+        }
         .confirmationDialog(L10n.text("¿Revocar todos los dispositivos?"), isPresented: $revokeAll) {
             Button(L10n.text("Revocar todos los dispositivos"), role: .destructive) { host.revokeAllDevices() }
         } message: { Text(L10n.text("Todos necesitarán una nueva invitación. Las terminales locales seguirán abiertas.")) }
@@ -201,13 +210,44 @@ private struct MacConnectionSheet: View {
     @ViewBuilder private var pairingContent: some View {
         InstructionRow(number: "1", title: L10n.text("Abre AFK en tu iPhone"), detail: L10n.text("Pulsa «Vincular Mac» en la pantalla de inicio."))
         VStack(alignment: .leading, spacing: 16) {
-            InstructionRow(number: "2", title: L10n.text("Comparte esta invitación"), detail: L10n.text("Copia la invitación segura y pégala en el iPhone."))
-            if busy {
+            InstructionRow(number: "2", title: L10n.text("Escanea el QR"), detail: L10n.text("Escanéalo con AFK o copia la invitación y pégala en el iPhone."))
+            if let candidate {
+                Text(L10n.text("Un iPhone quiere vincularse")).font(.headline)
+                Text(candidate.code).font(.system(size: 36, weight: .semibold, design: .monospaced))
+                Text(L10n.text("Comprueba que este código aparece en tu iPhone"))
+                Button(L10n.text("Los códigos coinciden: vincular")) {
+                    approving = true
+                    Task {
+                        await host.approvePairing(candidate.id)
+                        approving = false; completed = host.error == nil
+                    }
+                }.buttonStyle(.borderedProminent).disabled(approving)
+                Button(L10n.text("Rechazar"), role: .destructive) { host.cancelPairing() }
+            } else if completed {
+                Text(L10n.text("Vinculado. Comparte sesiones desde tu Mac"))
+                Button(L10n.text("Sesiones y permisos")) { destination = .devices }
+            } else if busy {
                 HStack(spacing: 12) { ProgressView().controlSize(.small); Text(L10n.text("Preparando invitación segura…")).foregroundStyle(.secondary) }
                     .frame(maxWidth: .infinity, minHeight: 128)
             } else if host.host != nil, let pairing = host.pairing, host.error == nil {
                 VStack(alignment: .leading, spacing: 16) {
-                    credential(L10n.text("Invitación segura"), value: pairing.secret, large: false)
+                    if let qr = pairingQR(pairing.secret) {
+                        Image(nsImage: qr).interpolation(.none).resizable().scaledToFit()
+                            .frame(width: 360, height: 360).padding(20).background(.white)
+                            .accessibilityLabel(L10n.text("Escanea este QR con AFK en tu iPhone"))
+                    } else { Text(L10n.text("Usa Pegar invitación en el iPhone.")) }
+                    Button(L10n.text(copied ? "Copiado" : "Copiar invitación")) {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(pairing.secret, forType: .string)
+                        NSPasteboard.general.setData(Data(), forType: .init("org.nspasteboard.ConcealedType"))
+                        NSPasteboard.general.setData(Data(), forType: .init("org.nspasteboard.TransientType"))
+                        copied = true
+                        let change = NSPasteboard.general.changeCount
+                        Task {
+                            try? await Task.sleep(for: .seconds(300))
+                            if NSPasteboard.general.changeCount == change { NSPasteboard.general.clearContents() }
+                        }
+                    }
                 }
                 .padding(20).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -230,31 +270,6 @@ private struct MacConnectionSheet: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text(L10n.text("El Mac verifica tu dispositivo. La terminal viaja cifrada de extremo a extremo."))
                 .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    private func credential(_ title: String, value: String, large: Bool) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.caption).foregroundStyle(.secondary)
-                Text(value.hasPrefix("AFK2:") ? "AFK2:…" : value).font(large ? .system(size: 30, weight: .medium, design: .monospaced) : .system(size: 16, weight: .medium, design: .monospaced))
-                    .textSelection(.enabled).accessibilityLabel(title)
-            }
-            Spacer(minLength: 0)
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(value, forType: .string)
-                NSPasteboard.general.setData(Data(), forType: .init("org.nspasteboard.ConcealedType"))
-                NSPasteboard.general.setData(Data(), forType: .init("org.nspasteboard.TransientType"))
-                let change = NSPasteboard.general.changeCount
-                Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(300))
-                    if NSPasteboard.general.changeCount == change { NSPasteboard.general.clearContents() }
-                }
-                copied = title
-            } label: {
-                Label(copied == title ? L10n.text("Copiado") : L10n.text("Copiar"), systemImage: copied == title ? "checkmark" : "doc.on.doc")
-            }.help(L10n.format("Copiar %@", title))
         }
     }
 
@@ -336,16 +351,23 @@ private struct MacConnectionSheet: View {
     private func prepare() async {
         guard !busy else { return }
         if destination == .server { return }
-        busy = true; copied = nil; host.error = nil
+        busy = true; copied = false; host.error = nil
         defer { busy = false }
         if destination == .devices { await host.refreshClients(server: server); return }
-        if !host.relay.connected { await host.connect(server: server) }
-        guard host.error == nil else { return }
         if destination == .pair {
-            do { try await LocalDeviceUnlock().require(); await host.makePairing() }
-            catch { host.error = error.localizedDescription }
+            completed = false
+            await host.beginPairing(server: server)
         }
         else { await host.refreshClients() }
+    }
+
+    private func pairingQR(_ value: String) -> NSImage? {
+        guard value.utf8.count <= 2048 else { return nil }
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(value.utf8); filter.correctionLevel = "M"
+        guard let output = filter.outputImage,
+              let image = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 
     private func remaining(_ date: String, now: Date) -> Int {

@@ -12,7 +12,7 @@ or universally more secure than another product.
 - Local 256-bit, five-minute, single-use invitation; five persisted attempts.
   Authorization and invitation consumption commit atomically before acknowledgement.
 - Device-only Keychain identity persistence. Device-owner authentication gates
-  invitation creation on Mac and pairing/reconnection in the iPhone UI.
+  invitation creation and candidate approval on Mac, and pairing/reconnection in the iPhone UI.
 - Local revocation precedes network revocation. Persistence failures disconnect.
   No automatic replacement of an identity, legacy fallback or uncertain input replay.
 - The host validates the authorized certificate on every application packet, then
@@ -52,8 +52,9 @@ of hardware-backed non-exportability. Biometrics must be verified on physical
 hardware; a person who knows the device passcode can pass device-owner authentication.
 
 Only share invitations through a channel you trust. A stolen unused invitation
-allows enrollment during its short lifetime. Pairing currently uses explicit copy /
-paste, not QR scanning. The relay sees host/client routing metadata, addresses,
+allows an enrollment attempt during its short lifetime; local authenticated Mac
+approval is still required. Pair using the local QR scanner or explicit paste,
+verify the server origin and compare the eight-digit code on both devices. The relay sees host/client routing metadata, addresses,
 timing and ciphertext lengths, and can deny service; it cannot be made availability-
 trusted by encryption. Registration abuse is rate/budget limited, not eliminated.
 The single-instance limiter sees the TCP peer, which may be a shared reverse proxy.

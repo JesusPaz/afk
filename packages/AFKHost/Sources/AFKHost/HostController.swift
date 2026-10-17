@@ -30,12 +30,19 @@ public final class HostController: ObservableObject {
     private var base: URL?
     private var secret: HostSecret?
     private var timer: Timer?
+    private let pairingUnlock = LocalDeviceUnlock()
+    private var pairingGeneration = UUID()
+    private var lockObserver: NSObjectProtocol?
     private var statusSubscription: AnyCancellable?
 
     public init(preferences: UserDefaults = .standard, access: RemoteAccess? = nil) {
         self.preferences = preferences
         self.access = access ?? RemoteAccess(); history = AccessHistory(preferences: preferences)
         remoteAccessPaused = preferences.bool(forKey: "remoteAccessPaused")
+        relay.onPairingEnded = { [weak self] in self?.pairing = nil }
+        lockObserver = DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.cancelPairing() }
+        }
         relay.onMessage = { [weak self] in self?.receive($0) }
         relay.onDisconnect = { [weak self] in
             guard let self else { return }
@@ -46,6 +53,7 @@ public final class HostController: ObservableObject {
             MainActor.assumeIsolated { self?.tick() }
         }
     }
+    deinit { if let lockObserver { DistributedNotificationCenter.default().removeObserver(lockObserver) } }
     @discardableResult
     public func create(name: String = "Shell", id: String = UUID().uuidString) -> HostSession? {
         if let existing = sessions.first(where: { $0.id == id }) { return existing }
@@ -76,6 +84,29 @@ public final class HostController: ObservableObject {
             base = url; secret = identity; host = h; error = nil
         } catch { self.error = error.localizedDescription }
     }
+    public func cancelPairing() {
+        pairingGeneration = UUID(); pairingUnlock.invalidate(); pairing = nil
+        do { try relay.cancelInvitation() } catch { self.error = error.localizedDescription }
+    }
+    public func beginPairing(server: String) async {
+        cancelPairing()
+        let generation = pairingGeneration
+        if !relay.connected { await connect(server: server) }
+        guard generation == pairingGeneration, !Task.isCancelled, error == nil else { return }
+        do {
+            try await pairingUnlock.require()
+            guard generation == pairingGeneration, !Task.isCancelled else { return }
+            await makePairing()
+        } catch { self.error = error.localizedDescription }
+    }
+    public func approvePairing(_ id: UUID) async {
+        error = nil
+        do {
+            try await pairingUnlock.require()
+            try relay.approvePairing(id)
+            clients = relay.clients
+        } catch { self.error = error.localizedDescription }
+    }
     public func makePairing() async {
         guard base != nil, secret != nil else { error = L10n.text("Conecta el Mac al relay primero."); return }
         do { pairing = try relay.invitation() }
@@ -102,6 +133,7 @@ public final class HostController: ObservableObject {
         }
     }
     public func pause() {
+        cancelPairing()
         accessRevision += 1
         remoteAccessPaused = true; preferences.set(true, forKey: "remoteAccessPaused")
         access.removeAll(); relay.disconnect(); pairing = nil
@@ -133,6 +165,7 @@ public final class HostController: ObservableObject {
     }
     private func releaseControl(_ client: String) { sessions.forEach { $0.release(client) } }
     func tick() {
+        do { try relay.expireInvitationIfNeeded() } catch { self.error = error.localizedDescription }
         let expired = access.expire()
         for (client, session) in expired { record(.expired, client: client, session: session) }
         for session in sessions {

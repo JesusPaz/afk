@@ -17,6 +17,17 @@ import (
 
 // The native XCTest uses two actual TLS peers and a real macOS PTY.
 func TestRealSecureSwiftPTY(t *testing.T) {
+	// Each scenario gets its own relay and request budget; never relax production limits.
+	for _, scenario := range []string{
+		"testSecurePairingRealPTYReconnectAndRevocation",
+		"testConsentCancellationConcurrencyAndPhonePersistence",
+		"testAllSessionCommandsRejectedWhilePending",
+	} {
+		t.Run(scenario, func(t *testing.T) { runSecureSwift(t, scenario) })
+	}
+}
+
+func runSecureSwift(t *testing.T, scenario string) {
 	packagePath, database := os.Getenv("AFK_TEST_SWIFT_PACKAGE"), os.Getenv("AFK_TEST_DATABASE_URL")
 	if packagePath == "" || database == "" {
 		t.Skip("requires prebuilt Swift tests and PostgreSQL")
@@ -46,12 +57,12 @@ func TestRealSecureSwiftPTY(t *testing.T) {
 	}
 	id := fmt.Sprintf("%x-%x-%x-%x-%x", random[:4], random[4:6], random[6:8], random[8:10], random[10:])
 	defer db.Exec(context.Background(), "DELETE FROM hosts WHERE id=$1", id)
-	cmd := exec.CommandContext(ctx, "swift", "test", "--skip-build", "--filter", "SecureIntegrationTests")
+	cmd := exec.CommandContext(ctx, "swift", "test", "--skip-build", "--filter", "SecureIntegrationTests/"+scenario)
 	cmd.Dir = packagePath
 	cmd.Env = append(os.Environ(), "AFK_E2EE_TEST_URL="+relayURL, "AFK_E2EE_HOST_ID="+id, "SHELL=/bin/sh")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("secure native integration failed: %v\n%s", err, output)
 	}
-	t.Log("native mutual TLS, pairing, two peers, PTY, replay, control, resize, reconnect and revocation passed")
+	t.Logf("native secure scenario %s passed", scenario)
 }

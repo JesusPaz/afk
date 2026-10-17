@@ -1,1 +1,3 @@
 "NSLocalNetworkUsageDescription" = "AFK connects to the relay you chose to share your Mac terminal.";
+
+"NSCameraUsageDescription" = "AFK uses the camera to scan the pairing QR on your Mac.";

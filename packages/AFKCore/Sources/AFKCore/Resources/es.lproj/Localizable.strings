@@ -221,3 +221,49 @@
 "Permiso vencido" = "Permiso vencido";
 "Dispositivo revocado" = "Dispositivo revocado";
 "Acceso remoto detenido" = "Acceso remoto detenido";
+
+"Un iPhone quiere vincularse" = "Un iPhone quiere vincularse";
+
+"Comprueba que este código aparece en tu iPhone" = "Comprueba que este código aparece en tu iPhone";
+
+"Los códigos coinciden: vincular" = "Los códigos coinciden: vincular";
+
+"Rechazar" = "Rechazar";
+
+"Vinculado. Comparte sesiones desde tu Mac" = "Vinculado. Comparte sesiones desde tu Mac";
+
+"Escanea este QR con AFK en tu iPhone" = "Escanea este QR con AFK en tu iPhone";
+
+"Usa Pegar invitación en el iPhone." = "Usa Pegar invitación en el iPhone.";
+
+"Copiar invitación" = "Copiar invitación";
+
+"Confirma en tu Mac" = "Confirma en tu Mac";
+
+"Escanear QR" = "Escanear QR";
+
+"Cámara no disponible. Puedes pegar la invitación o habilitar la cámara en Ajustes." = "Cámara no disponible. Puedes pegar la invitación o habilitar la cámara en Ajustes.";
+
+"Pegar invitación" = "Pegar invitación";
+
+"Continuar" = "Continuar";
+
+"Conectar con este servidor" = "Conectar con este servidor";
+
+"Actualiza ambas apps y genera una invitación nueva en el Mac." = "Actualiza ambas apps y genera una invitación nueva en el Mac.";
+
+"La invitación segura no es válida o venció. Crea otra en el Mac." = "La invitación segura no es válida o venció. Crea otra en el Mac.";
+
+"No se pudo verificar la identidad del dispositivo." = "No se pudo verificar la identidad del dispositivo.";
+
+"No se pudo guardar la autorización." = "No se pudo guardar la autorización.";
+
+"La conexión segura no cumple el protocolo." = "La conexión segura no cumple el protocolo.";
+
+"Se cerró la conexión segura. Reconecta para continuar." = "Se cerró la conexión segura. Reconecta para continuar.";
+
+"Escanea el QR" = "Escanea el QR";
+
+"Escanéalo con AFK o copia la invitación y pégala en el iPhone." = "Escanéalo con AFK o copia la invitación y pégala en el iPhone.";
+
+"Escanea el QR que aparece en tu Mac." = "Escanea el QR que aparece en tu Mac.";
