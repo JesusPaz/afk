@@ -26,7 +26,7 @@ import XCTest
             for sequence in 1...max(1, sent.count) { buffer.acknowledge(UInt64(sequence)) }
         }
         XCTAssertGreaterThan(sent.count, 0, "Continuous input must not reset the flush deadline")
-        try await Task.sleep(for: .milliseconds(50))
+        try await waitFor { sent.count == 100 }
         XCTAssertEqual(sent, Data(repeating: 0x61, count: 100))
     }
 
@@ -81,14 +81,16 @@ import XCTest
 
     func testNoAcknowledgementsBoundsWindowAndStopsRetries() async throws {
         var attempts = 0
+        var originals = 0
         let failed = expectation(description: "delivery stopped")
         let buffer = TerminalInputBuffer(send: { _, retry in
             attempts += 1
-            return retry ?? UInt64(attempts)
+            if retry == nil { originals += 1 }
+            return retry ?? UInt64(originals)
         }, failed: { failed.fulfill() })
         buffer.append(Data(repeating: 0x61, count: 64 * 1024))
-        try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(attempts, 4)
+        try await waitFor { originals == 4 }
+        XCTAssertEqual(originals, 4)
         XCTAssertFalse(buffer.append(Data([0x62])), "In-flight bytes still count against the bound")
         buffer.acknowledge(999) // Unsolicited ACK cannot free space.
         XCTAssertFalse(buffer.append(Data([0x62])))
@@ -107,7 +109,7 @@ import XCTest
             next += 1; return next
         }, failed: { XCTFail("Unexpected delivery failure") })
         buffer.append(Data(repeating: 0x61, count: 16384))
-        try await Task.sleep(for: .milliseconds(100))
+        try await waitFor { next == 2 }
         XCTAssertEqual(next, 2)
         buffer.acknowledge(2)
         XCTAssertTrue(buffer.hasPendingInput)
@@ -123,11 +125,19 @@ import XCTest
         let buffer = TerminalInputBuffer(send: { _, _ in sends += 1; return UInt64(sends) },
                                          failed: { XCTFail("Cancelled input must not time out") })
         buffer.append(Data("old session\n".utf8))
-        try await Task.sleep(for: .milliseconds(100))
+        try await waitFor { sends == 1 }
         XCTAssertEqual(sends, 1)
         buffer.cancel()
         try await Task.sleep(for: .milliseconds(1100))
         XCTAssertEqual(sends, 1)
         XCTAssertFalse(buffer.hasPendingInput)
     }
+    private func waitFor(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !condition(), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(condition(), "Expected input delivery event", file: file, line: line)
+    }
+
 }
