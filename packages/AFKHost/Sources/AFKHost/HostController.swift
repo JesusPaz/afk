@@ -23,6 +23,7 @@ public final class HostController: ObservableObject {
     public private(set) var accessRevision: UInt64 = 0
     public let access: RemoteAccess
     @Published public private(set) var connectedClients: Set<String> = []
+    private var transfers: [String: (id: String, session: String, reader: TerminalHistory.Reader)] = [:]
     private let history: AccessHistory
     public var accessEvents: [AccessEvent] { history.events }
     private let historyDirectory: URL?
@@ -51,6 +52,7 @@ public final class HostController: ObservableObject {
         relay.onMessage = { [weak self] in self?.receive($0) }
         relay.onDisconnect = { [weak self] in
             guard let self else { return }
+            self.transfers.removeAll()
             for session in self.sessions where session.lease.owner != "local" { session.release(session.lease.owner) }
         }
         statusSubscription = relay.$status.sink { [weak self] in self?.connectionStatus = $0 }
@@ -237,10 +239,12 @@ public final class HostController: ObservableObject {
     private func forward(_ message: Message) {
         guard let session = message.sessionID else { return }
         for client in connectedClients where access.level(client: client, session: session) != .none {
+            if transfers[client]?.session == session && ["output", "resized"].contains(message.type) { continue }
             var m = message; m.clientID = client; relay.send(m)
         }
     }
     private func deny(_ client: String, session: String? = nil) {
+        transfers.removeValue(forKey: client)
         record(.denied, client: client, session: session)
         sendError("El Mac no ha autorizado esta operación.", client: client)
         publishSessions(to: client)
@@ -248,12 +252,32 @@ public final class HostController: ObservableObject {
     private func sendError(_ text: String, client: String, session: String? = nil) {
         var m = Message("error", sessionID: session); m.clientID = client; m.message = text; relay.send(m)
     }
+    private func sendHistory(client: String, session: HostSession) {
+        guard let transfer = transfers[client] else { return }
+        do {
+            session.flushOutput()
+            guard session.feed.historyError == nil else { throw CocoaError(.fileReadUnknown) }
+            try transfer.reader.refreshLength()
+            let events = try transfer.reader.next(maxBytes: 32 * 1024)
+            let complete = transfer.reader.offset == transfer.reader.length
+            var reply = Message("historyChunk", sessionID: session.id)
+            reply.clientID = client; reply.historyID = transfer.id; reply.events = events
+            reply.historyOffset = transfer.reader.offset; reply.historyLength = transfer.reader.length
+            reply.historyComplete = complete; reply.sequence = session.feed.sequence
+            reply.inputAcknowledgements = true; reply.owner = session.lease.owner; reply.epoch = session.lease.epoch
+            relay.send(reply)
+            if complete { transfers.removeValue(forKey: client) }
+        } catch {
+            transfers.removeValue(forKey: client)
+            sendError("No se pudo leer el historial completo del Mac.", client: client, session: session.id)
+        }
+    }
     func receive(_ m: Message) {
         guard let client = m.clientID else { return }
         if m.type == "clientConnected" {
             connectedClients.insert(client); clients = relay.clients; record(.connected, client: client); publishSessions(to: client); return
         }
-        if m.type == "clientDisconnected" { connectedClients.remove(client); releaseControl(client); record(.disconnected, client: client); return }
+        if m.type == "clientDisconnected" { transfers.removeValue(forKey: client); connectedClients.remove(client); releaseControl(client); record(.disconnected, client: client); return }
         guard connectedClients.contains(client) else { return }
         tick()
         if m.type == "list" { publishSessions(to: client); return }
@@ -268,7 +292,25 @@ public final class HostController: ObservableObject {
         if ["claim", "renew", "input", "resize"].contains(m.type), access.level(client: client, session: session.id) != .control { deny(client, session: session.id); return }
         if m.type == "terminate", !access.canClose(client: client, session: session.id) { deny(client, session: session.id); return }
         switch m.type {
+        case "historyNext":
+            guard let transfer = transfers[client], transfer.session == session.id,
+                  transfer.id == m.historyID, transfer.reader.offset == m.historyOffset else { return }
+            sendHistory(client: client, session: session)
         case "attach":
+            transfers.removeValue(forKey: client)
+            if let id = m.historyID {
+                guard UUID(uuidString: id) != nil else { return }
+                do {
+                    session.flushOutput()
+                    guard session.feed.historyError == nil, let history = session.feed.history else {
+                        throw CocoaError(.fileReadUnknown)
+                    }
+                    transfers[client] = (id, session.id, try TerminalHistory.Reader(history.entry))
+                    record(.viewed, client: client, session: session.id)
+                    sendHistory(client: client, session: session)
+                } catch { sendError("No se pudo leer el historial completo del Mac.", client: client, session: session.id) }
+                return
+            }
             session.flushOutput()
             record(.viewed, client: client, session: session.id)
             guard let bytes = session.feed.snapshot else {

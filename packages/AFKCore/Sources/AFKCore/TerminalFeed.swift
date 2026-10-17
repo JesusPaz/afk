@@ -40,7 +40,11 @@ public final class TerminalFeed: ObservableObject {
     @Published public private(set) var size = TerminalSize.initial
     public var sequence: UInt64 = 0
     public var snapshot: [TerminalEvent]? { replay.snapshot }
-    public let history: TerminalHistory?
+    public private(set) var history: TerminalHistory?
+    public func replaceHistory(_ history: TerminalHistory?) {
+        self.history = history; historyError = nil
+        _ = reset([], sequence: 0)
+    }
     @Published public private(set) var historyError: String?
     public init(history: TerminalHistory? = nil) { self.history = history }
     public func synchronizeHistory() {

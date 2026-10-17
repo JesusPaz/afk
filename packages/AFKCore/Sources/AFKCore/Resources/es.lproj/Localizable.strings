@@ -311,3 +311,5 @@
 "Posición en el historial" = "Posición en el historial";
 
 "Usa la barra para recorrer toda la grabación; desplázate en la terminal para ver las líneas cercanas." = "Usa la barra para recorrer toda la grabación; desplázate en la terminal para ver las líneas cercanas.";
+"No se pudo leer el historial completo del Mac." = "No se pudo leer el historial completo del Mac.";
+"Historial completo" = "Historial completo";

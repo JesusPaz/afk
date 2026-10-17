@@ -12,6 +12,17 @@ final class RemoteModel: ObservableObject {
     @Published var comparisonCode: String?
     private var pairingSubscription: AnyCancellable?
     let feed = TerminalFeed()
+    private let historyRoot = FileManager.default.temporaryDirectory.appendingPathComponent("AFK-" + UUID().uuidString)
+    private(set) var historyID: String?
+    private var historyRequest: Task<Void, Never>?
+    @Published var historyProgress: Double?
+    deinit { try? FileManager.default.removeItem(at: historyRoot) }
+    private func clearHistory() {
+        historyRequest?.cancel(); historyRequest = nil
+        historyID = nil; historyProgress = nil
+        feed.replaceHistory(nil)
+        try? FileManager.default.removeItem(at: historyRoot)
+    }
     @Published var sessions: [SessionInfo] = []
     @Published var selected: String?
     @Published var error: String?
@@ -48,7 +59,7 @@ final class RemoteModel: ObservableObject {
         if inputBuffer.hasPendingInput { sessionNotice = L10n.text("Hay entrada sin confirmar. Revisa la terminal antes de volver a escribir.") }
         inputBuffer.cancel()
         ready = false; owner = ""; epoch = 0; inputSequence = 0
-        _ = feed.reset([], sequence: 0)
+        clearHistory()
     }
 
     init() {
@@ -91,6 +102,7 @@ final class RemoteModel: ObservableObject {
     func reconnect() {
         guard !unlock.isBusy, !reconnecting, !pairing else { return }
         inputBuffer.cancel()
+        historyID = nil; historyProgress = nil
         ready = false; reconnecting = true
         Task {
             defer { reconnecting = false }
@@ -104,12 +116,19 @@ final class RemoteModel: ObservableObject {
     func attach(_ id: String) {
         if selected != id { release(); epoch = 0; inputSequence = 0 }
         inputBuffer.cancel()
-        selected = id; ready = false; sessionNotice = nil; relay.send(Message("attach", sessionID: id))
+        selected = id; ready = false; sessionNotice = nil
+        clearHistory()
+        do {
+            feed.replaceHistory(try TerminalHistory(root: historyRoot, name: selectedInfo?.name ?? "Terminal"))
+            historyID = UUID().uuidString; historyProgress = 0
+            var request = Message("attach", sessionID: id); request.historyID = historyID
+            relay.send(request)
+        } catch { sessionNotice = error.localizedDescription }
     }
     func claim() { guard canClaim else { return }; relay.send(Message("claim", sessionID: selected)) }
     func release() { inputBuffer.cancel(); if canWrite { relay.send(Message("release", sessionID: selected)) }; owner = "" }
-    func leave() { release(); selected = nil; ready = false }
-    func suspend() { cancelPairing(); unlock.invalidate(); release(); relay.disconnect(); ready = false; sessions = []; _ = feed.reset([], sequence: 0) }
+    func leave() { release(); selected = nil; ready = false; clearHistory() }
+    func suspend() { cancelPairing(); unlock.invalidate(); release(); relay.disconnect(); ready = false; sessions = []; clearHistory() }
     func resize(_ size: TerminalSize) {
         viewport = size
         sendSize()
@@ -141,15 +160,47 @@ final class RemoteModel: ObservableObject {
         switch m.type {
         case "welcome": relay.send(Message("list"))
         case "hostOnline": hostAvailable = true; relay.send(Message("list")); if let selected { attach(selected) }
-        case "hostOffline": inputBuffer.cancel(); hostAvailable = false; ready = false; owner = ""; status = L10n.text("El Mac no está disponible")
+        case "hostOffline": clearHistory(); inputBuffer.cancel(); hostAvailable = false; ready = false; owner = ""; status = L10n.text("El Mac no está disponible")
         case "sessions":
             hostAvailable = true; sessions = m.sessions ?? []; canCreate = m.canCreate == true
             if let selected, !sessions.contains(where: { $0.id == selected }) {
                 clearTerminal(); self.selected = nil; sessionNotice = L10n.text("El Mac retiró el acceso a esta sesión.")
             } else if !canClaim { inputBuffer.cancel(); owner = "" }
 
+        case "historyChunk":
+            guard m.sessionID == selected, selectedInfo != nil, let id = historyID, m.historyID == id,
+                  let events = m.events, events.allSatisfy(\.isValid), let offset = m.historyOffset,
+                  let length = m.historyLength, offset <= length else { return }
+            for event in events {
+                if let size = event.size { feed.resize(size) }
+                if let data = event.data { feed.append(data) }
+            }
+            if let error = feed.historyError {
+                historyID = nil; historyProgress = nil; sessionNotice = error; return
+            }
+            historyRequest?.cancel(); historyRequest = nil
+            historyProgress = length == 0 ? 1 : Double(offset) / Double(length)
+            if m.historyComplete == true {
+                feed.sequence = m.sequence ?? 0
+                inputAcknowledgements = m.inputAcknowledgements == true
+                owner = m.owner ?? ""; epoch = m.epoch ?? 0; inputSequence = 0
+                historyID = nil; historyProgress = nil; ready = true; sendSize()
+            } else {
+                var next = Message("historyNext", sessionID: selected)
+                next.historyID = id; next.historyOffset = offset
+                // Stay below relay frame/byte budgets even on a fast LAN and yield to rendering.
+                historyRequest = Task { [weak self] in
+                    do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
+                    guard let self, self.historyID == id else { return }
+                    self.relay.send(next)
+                }
+            }
         case "snapshot":
             guard m.sessionID == selected, selectedInfo != nil, let events = m.events, feed.reset(events, sequence: m.sequence ?? 0) else { return }
+            historyID = nil; historyProgress = nil
+            // Older hosts send one bounded snapshot instead of disk-backed chunks.
+            do { for event in events { try feed.history?.append(event) } }
+            catch { sessionNotice = error.localizedDescription; return }
             if owner != (m.owner ?? "") || epoch != m.epoch { inputBuffer.cancel() }
             inputAcknowledgements = m.inputAcknowledgements == true
             if !inputAcknowledgements { sessionNotice = L10n.text("Actualiza AFK en el Mac para escribir con confirmación de entrega.") }
@@ -173,7 +224,7 @@ final class RemoteModel: ObservableObject {
                 if let index = sessions.firstIndex(where: { $0.id == selected }) { sessions[index].running = false }
             }
         case "error":
-            if let sessionID = m.sessionID, sessionID == selected { inputBuffer.cancel(); ready = false; sessionNotice = m.message.map { L10n.text($0) } }
+            if let sessionID = m.sessionID, sessionID == selected { historyID = nil; historyProgress = nil; inputBuffer.cancel(); ready = false; sessionNotice = m.message.map { L10n.text($0) } }
             else { error = m.message.map { L10n.text($0) } }
         default: break
         }

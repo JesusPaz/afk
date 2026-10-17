@@ -188,3 +188,25 @@ and iPhone 13 Pro; automated TLS tests do not prove Face ID behavior.
 Apple references: [Secure Enclave keys](https://developer.apple.com/documentation/security/protecting-keys-with-the-secure-enclave),
 [current biometric enrollment](https://developer.apple.com/documentation/security/secaccesscontrolcreateflags/biometrycurrentset),
 [App Attest’s separate integrity checks](https://developer.apple.com/documentation/devicecheck/establishing-your-app-s-integrity).
+
+## Complete terminal history
+
+An updated phone sends `attach` with a fresh UUID `historyID`. The Mac replies with
+`historyChunk`: ordered `events`, the same `historyID`, `historyOffset`,
+`historyLength`, `historyComplete`, and the current output `sequence`, owner/epoch
+and input-acknowledgement capability. Each `historyNext` echoes the transfer ID and
+last offset; mismatched/obsolete cursors cannot advance the reader. One reader per
+phone bounds memory and open files. Access is checked on every request.
+
+The Mac flushes pending PTY output before each read and refreshes the recording’s
+length. Only output/resize events for that downloading phone/session are suppressed;
+other viewers and the local terminal continue normally. The final page and resumption
+of live output occur on the host main actor, with no gap between the recording and
+the next output sequence. The phone renders and journals each page before requesting
+another, with a 20 ms pacing interval to stay within relay frame/byte budgets. Input remains disabled until completion. Disk errors fail explicitly rather
+than silently dropping history. Reconnect starts a fresh download. No total byte cap
+is imposed; sustained output faster than download can delay catching up.
+
+Absent `historyID`, the bounded legacy snapshot behavior is retained. Updated apps
+require a Mac recording for streamed history; the production Mac creates these for
+every session. There is no relay wire-format change: all fields remain inside TLS.

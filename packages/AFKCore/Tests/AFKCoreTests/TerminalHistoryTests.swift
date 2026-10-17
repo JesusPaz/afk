@@ -29,6 +29,26 @@ final class TerminalHistoryTests: XCTestCase {
         try TerminalHistory.delete(entry)
         XCTAssertTrue(try TerminalHistory.entries(root: root).isEmpty)
     }
+    func testReaderCatchesUpWithOutputAppendedDuringTransfer() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let history = try TerminalHistory(root: root, name: "Growing")
+        try history.append(TerminalEvent(data: Data(repeating: 65, count: 1024 * 1024)))
+        let reader = try TerminalHistory.Reader(history.entry)
+        let initialLength = reader.length
+        _ = try reader.next(maxBytes: 32 * 1024)
+        XCTAssertLessThan(reader.offset, initialLength)
+        let resize = TerminalEvent(size: TerminalSize(columns: 90, rows: 40))
+        let tail = TerminalEvent(data: Data("new output".utf8))
+        try history.append(resize); try history.append(tail)
+        try reader.refreshLength()
+        XCTAssertGreaterThan(reader.length, initialLength)
+        var last: [TerminalEvent] = []
+        while reader.offset < reader.length { last = try reader.next(maxBytes: 32 * 1024) }
+        XCTAssertEqual(Array(last.suffix(2)), [resize, tail])
+        XCTAssertEqual(reader.offset, reader.length)
+    }
+
     func testReaderRejectsCorruptLengthWithoutAllocatingIt() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

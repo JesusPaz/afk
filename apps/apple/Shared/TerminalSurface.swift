@@ -47,9 +47,7 @@ final class TerminalContainer: PlatformView {
         cell = CGSize(width: terminal.getOptimalFrameSize().width - first.width, height: first.height / 24)
         extraWidth = first.width - 80 * cell.width
         terminal.resize(cols: 80, rows: 24)
-        #if os(macOS)
         terminal.getTerminal().changeScrollback(10_000)
-        #endif
         addSubview(scroll)
         #if os(macOS)
         scroll.drawsBackground = false
@@ -151,11 +149,7 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
         }
         attaching = true
         defer { attaching = false }
-        #if os(macOS)
         let restoreHistory = true
-        #else
-        let restoreHistory = false
-        #endif
         observation = feed.observe(replayHistory: restoreHistory) { [weak self, weak container] events, reset in
             guard let self, let container else { return }
             let view = container.terminal
@@ -236,7 +230,6 @@ struct TerminalSurface: UIViewRepresentable {
 }
 #endif
 
-#if os(macOS)
 struct HistoryRecordingStatus: View {
     @ObservedObject var feed: TerminalFeed
     var body: some View {
@@ -247,6 +240,7 @@ struct HistoryRecordingStatus: View {
     }
 }
 
+#if os(macOS)
 struct SavedTerminalHistory: View {
     let active: Set<String>
     @Environment(\.dismiss) private var dismiss
@@ -304,7 +298,9 @@ struct SavedTerminalHistory: View {
     }
 }
 
-private struct RecordedTerminal: View {
+#endif
+
+struct RecordedTerminal: View {
     let entry: TerminalHistory.Entry
     @StateObject private var feed = TerminalFeed()
     @State private var position = 1.0
@@ -350,4 +346,3 @@ private struct RecordedTerminal: View {
     private var step: Double { length == 0 ? 1 : min(1, 8 * 1024 / Double(length)) }
     private func seek(_ value: Double) { position = value; target = value }
 }
-#endif

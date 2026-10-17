@@ -2,6 +2,63 @@ import XCTest
 import AFKCore
 
 @MainActor final class RemoteAccessModelTests: XCTestCase {
+    func testChunkedHistoryBeyondCapKeepsEveryByteAndHandsOffToLiveOutput() throws {
+        let model = RemoteModel(), id = UUID().uuidString
+        var list = Message("sessions")
+        list.sessions = [SessionInfo(id: id, name: "Long", running: true, owner: "local", epoch: 1)]
+        model.relay.onMessage?(list); model.attach(id)
+        let transfer = try XCTUnwrap(model.historyID)
+        let bytes = Data(repeating: 65, count: 32 * 1024)
+        let size = TerminalSize(columns: 100, rows: 30)
+        for page in 1...40 {
+            var chunk = Message("historyChunk", sessionID: id)
+            chunk.historyID = transfer; chunk.events = [TerminalEvent(data: bytes)]
+            if page == 20 { chunk.events?.append(TerminalEvent(size: size)) }
+            chunk.historyOffset = UInt64(page); chunk.historyLength = 40
+            chunk.historyComplete = page == 40; chunk.sequence = 100; chunk.inputAcknowledgements = true
+            model.relay.onMessage?(chunk)
+            XCTAssertEqual(model.ready, page == 40)
+            if page < 40 { XCTAssertFalse(model.canWrite) }
+        }
+        XCTAssertNil(model.feed.snapshot)
+        XCTAssertEqual(model.feed.size, size)
+        var live = Message("output", sessionID: id); live.sequence = 101; live.data = Data("tail".utf8).base64EncodedString()
+        model.relay.onMessage?(live); model.relay.onMessage?(live)
+        let reader = try TerminalHistory.Reader(XCTUnwrap(model.feed.history).entry)
+        var output = Data(), sizes: [TerminalSize] = []
+        while reader.offset < reader.length {
+            for event in try reader.next() {
+                if let data = event.data { output.append(data) }
+                if let size = event.size { sizes.append(size) }
+            }
+        }
+        XCTAssertEqual(output, Data(repeating: 65, count: 40 * bytes.count) + Data("tail".utf8))
+        XCTAssertEqual(sizes, [size]); XCTAssertEqual(model.feed.sequence, 101)
+        let directory = try XCTUnwrap(model.feed.history).entry.directory
+        model.suspend()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    func testReattachAndRevocationRejectStaleHistoryChunks() throws {
+        let model = RemoteModel(), id = UUID().uuidString
+        var list = Message("sessions")
+        list.sessions = [SessionInfo(id: id, name: "Long", running: true, owner: "local", epoch: 1)]
+        model.relay.onMessage?(list); model.attach(id)
+        var chunk = Message("historyChunk", sessionID: id)
+        chunk.historyID = try XCTUnwrap(model.historyID)
+        chunk.events = [TerminalEvent(data: Data("stale".utf8))]
+        chunk.historyOffset = 1; chunk.historyLength = 1; chunk.historyComplete = true
+        model.attach(id); model.relay.onMessage?(chunk)
+        let currentTransfer = model.historyID
+        var staleSnapshot = Message("snapshot", sessionID: UUID().uuidString); staleSnapshot.events = []
+        model.relay.onMessage?(staleSnapshot)
+        XCTAssertEqual(model.historyID, currentTransfer)
+        XCTAssertFalse(model.ready); XCTAssertEqual(model.feed.snapshot, [])
+        chunk.historyID = model.historyID
+        list.sessions = []; model.relay.onMessage?(list); model.relay.onMessage?(chunk)
+        XCTAssertFalse(model.ready); XCTAssertNil(model.feed.history); XCTAssertEqual(model.feed.snapshot, [])
+    }
+
     func testOldHostRequiresUpdateForConfirmedInput() {
         let model = RemoteModel(), id = UUID().uuidString
         var info = SessionInfo(id: id, name: "Shared", running: true, owner: "", epoch: 1)

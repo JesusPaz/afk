@@ -7,7 +7,9 @@ import Security
 @MainActor final class SecureIntegrationTests: XCTestCase {
     func testSecurePairingRealPTYReconnectAndRevocation() async throws {
         guard let server = ProcessInfo.processInfo.environment["AFK_E2EE_TEST_URL"] else { throw XCTSkip("requires the local v2 relay and PostgreSQL") }
-        let host = HostController(preferences: UserDefaults(suiteName: "AFK-secure-tests")!)
+        let historyRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: historyRoot) }
+        let host = HostController(preferences: UserDefaults(suiteName: "AFK-secure-tests")!, historyDirectory: historyRoot)
         let credentials = try HostSecret(id: ProcessInfo.processInfo.environment["AFK_E2EE_HOST_ID"] ?? UUID().uuidString, token: SecretStore.randomToken())
         let account = "secure-test-\(UUID().uuidString)"
         let phone = SecurePhoneRelay(account: account, persist: { try SecretStore.write($0, account: account) }, makeIdentity: { _ in try DeviceIdentity.createSecureEnclave() })
@@ -151,12 +153,56 @@ import Security
         second.send(resize)
         try await until { session.feed.size.columns == 91 }
         XCTAssertFalse(secondMessages.contains { $0.data.flatMap { Data(base64Encoded: $0) }.map { String(decoding: $0, as: UTF8.self).contains("FORBIDDEN_STALE_OWNER") } ?? false })
-        // Removing read access immediately stops future output, not only snapshots.
+        // A history larger than the former cap crosses the actual encrypted transport.
+        let block = Data(repeating: 65, count: 32 * 1024)
+        for _ in 0..<40 { session.feed.sequence += 1; session.feed.append(block) }
+        XCTAssertNil(session.feed.snapshot)
+        let transferID = UUID().uuidString
+        var chunks: [Message] = []
+        var downloaded: [TerminalEvent] = []
+        phone.onMessage = { message in
+            received.append(message)
+            guard message.type == "historyChunk", message.historyID == transferID else { return }
+            chunks.append(message); downloaded.append(contentsOf: message.events ?? [])
+            XCTAssertLessThan((try? JSONEncoder().encode(message).count) ?? Int.max, 64 * 1024)
+            if chunks.count == 1 {
+                session.feed.sequence += 1; session.feed.resize(TerminalSize(columns: 110, rows: 35))
+                session.feed.sequence += 1; session.feed.append(Data("output during download".utf8))
+            }
+            if message.historyComplete != true {
+                var next = Message("historyNext", sessionID: session.id)
+                next.historyID = transferID; next.historyOffset = message.historyOffset
+                phone.send(next)
+            }
+        }
+        var attach = Message("attach", sessionID: session.id); attach.historyID = transferID
+        phone.send(attach)
+        try await until { chunks.last?.historyComplete == true }
+        let reader = try TerminalHistory.Reader(XCTUnwrap(session.feed.history).entry)
+        var recorded: [TerminalEvent] = []
+        while reader.offset < reader.length { recorded.append(contentsOf: try reader.next()) }
+        XCTAssertEqual(downloaded, recorded)
+        XCTAssertGreaterThan(chunks.count, 40)
+        XCTAssertEqual(chunks.last?.sequence, session.feed.sequence)
+        phone.onMessage = { received.append($0) }
+
+        // Stop a second transfer mid-download, then revoke access before its next page.
+        received = []
+        attach.historyID = UUID().uuidString
+        phone.send(attach)
+        try await until { received.contains { $0.type == "historyChunk" } }
+        let firstPage = try XCTUnwrap(received.first { $0.type == "historyChunk" })
+        // Removing read access immediately stops future output and further history pages.
         received = []
         host.setAccess(client: saved.credentials.clientID, session: session.id, level: .none)
         try await until { received.contains { $0.type == "sessions" && $0.sessions?.isEmpty == true } }
         // Earlier frames can already be in flight; the ordered permission update is the boundary.
         received = []
+        var forbiddenPage = Message("historyNext", sessionID: session.id)
+        forbiddenPage.historyID = attach.historyID; forbiddenPage.historyOffset = firstPage.historyOffset
+        phone.send(forbiddenPage)
+        try await until { received.contains { $0.type == "error" } }
+        XCTAssertFalse(received.contains { $0.type == "historyChunk" })
         var afterRemoval = Message("input", sessionID: session.id)
         afterRemoval.epoch = session.lease.epoch; afterRemoval.sequence = 2
         afterRemoval.data = Data("printf POST_REMOVAL_MARKER\n".utf8).base64EncodedString()
@@ -214,6 +260,11 @@ import Security
     }
     func testAllSessionCommandsRejectedWhilePending() async throws {
         try await withTestHost { host, _ in try await rejectedPendingCommands(host: host) }
+    }
+    func testHistoryRequestRejectedWhilePending() async throws {
+        try await withTestHost { host, _ in
+            try await rejectedPendingCommands(host: host, commands: ["historyNext"])
+        }
     }
     private func withTestHost(_ operation: (HostController, inout [String]) async throws -> Void) async throws {
         guard let server = ProcessInfo.processInfo.environment["AFK_E2EE_TEST_URL"] else { throw XCTSkip("requires the local v2 relay and PostgreSQL") }
@@ -293,8 +344,8 @@ import Security
         try host.relay.approvePairing(candidate.id)
         return try await task.value
     }
-    private func rejectedPendingCommands(host: HostController) async throws {
-        for command in ["list", "create", "attach", "input", "resize", "claim", "release", "renew", "terminate"] {
+    private func rejectedPendingCommands(host: HostController, commands: [String] = ["list", "create", "attach", "input", "resize", "claim", "release", "renew", "terminate"]) async throws {
+        for command in commands {
             await host.makePairing()
             let invitation = try SecureInvitation.decode(XCTUnwrap(host.pairing).secret)
             let id = UUID().uuidString, token = try SecretStore.randomToken(), identity = try DeviceIdentity.create()
