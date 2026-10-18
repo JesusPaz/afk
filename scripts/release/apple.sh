@@ -105,5 +105,5 @@ if [[ "$mode" == mac ]]; then
     (cd dist && shasum -a 256 "AFK-$RELEASE_TAG-macOS.zip" "AFK-$RELEASE_TAG-macOS.dmg" > SHA256SUMS)
     token=afk
     [[ "$RELEASE_TAG" != *-rc.* ]] || token=afk@preview
-    python3 scripts/release/cask.py "$RELEASE_TAG" "$dmg" "dist/$token.rb"
+    python3 scripts/release/cask.py "$RELEASE_TAG" "dist/AFK-$RELEASE_TAG-macOS.zip" "dist/$token.rb"
 fi
