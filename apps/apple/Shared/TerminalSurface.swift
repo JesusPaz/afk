@@ -133,6 +133,7 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
     private var attaching = false
     var active = true
     private var presentationStart: UInt64?
+    private var scrollTranslation: CGFloat = 0
     private var proposed: TerminalSize?
     private var pending: DispatchWorkItem?
     init(feed: TerminalFeed, editable: Bool, input: @escaping (Data) -> Void, resize: @escaping (TerminalSize) -> Void) {
@@ -190,10 +191,16 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
     }
     #if os(iOS)
     @objc func historyPan(_ gesture: UIPanGestureRecognizer) {
+        if gesture.state == .began { scrollTranslation = 0 }
         guard !replaying, !attaching, gesture.state == .changed,
               let view = gesture.view as? TerminalView, feed.presentationStart != nil else { return }
         let motion = gesture.translation(in: view)
         guard abs(motion.y) > abs(motion.x), abs(motion.y) > 12 else { return }
+        let lines = Int((motion.y - scrollTranslation) / 24)
+        if feed.onApplicationScroll?(lines) == true {
+            if lines != 0 { scrollTranslation = motion.y }
+            return
+        }
         if motion.y > 0 && view.contentOffset.y < 40 { feed.onHistoryEdge?(true) }
         if motion.y < 0 && view.contentOffset.y + view.bounds.height >= view.contentSize.height - 40 { feed.onHistoryEdge?(false) }
     }

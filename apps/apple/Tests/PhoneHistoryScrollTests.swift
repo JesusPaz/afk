@@ -10,6 +10,25 @@ private final class HistoryPan: UIPanGestureRecognizer {
 }
 
 @MainActor final class PhoneHistoryScrollTests: XCTestCase {
+    func testApplicationScrollUsesGestureDeltasInsteadOfRequestingArchivePages() {
+        let feed = TerminalFeed()
+        let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let coordinator = TerminalCoordinator(feed: feed, editable: true, input: { _ in }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        feed.present([], sequence: 1, start: 0, following: true)
+        var lines: [Int] = [], pages = 0
+        feed.onApplicationScroll = { lines.append($0); return true }
+        feed.onHistoryEdge = { _ in pages += 1 }
+        let pan = HistoryPan(); container.terminal.addGestureRecognizer(pan)
+        for y in [18, 48, 48, 72, 24] {
+            pan.motion = CGPoint(x: 0, y: y)
+            coordinator.historyPan(pan)
+        }
+        XCTAssertEqual(lines, [0, 2, 0, 1, -2])
+        XCTAssertEqual(pages, 0)
+    }
+
     func testPullingPastFirstRowLoadsOnePageAndKeepsVisibleAnchor() throws {
         let feed = TerminalFeed()
         let scrollback = RemoteScrollback(feed: feed)

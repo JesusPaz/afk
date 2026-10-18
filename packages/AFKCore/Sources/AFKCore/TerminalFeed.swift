@@ -39,6 +39,7 @@ public final class TerminalFeed: ObservableObject {
     public private(set) var presentationStart: UInt64?
     public private(set) var followingPresentation = true
     public var onHistoryEdge: ((Bool) -> Void)?
+    public var onApplicationScroll: ((Int) -> Bool)?
     public func present(_ events: [TerminalEvent], sequence: UInt64, start: UInt64, following: Bool) {
         presentation = events; presentationStart = start; followingPresentation = following
         self.sequence = sequence; size = events.compactMap(\.size).last ?? .initial

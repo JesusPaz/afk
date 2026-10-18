@@ -9,6 +9,33 @@ private final class SilentTerminalDelegate: TerminalDelegate {
 }
 
 @MainActor final class TerminalScreenTests: XCTestCase {
+    func testCodexAlternateScreenScrollSurvivesPhoneResizeWithoutSendingInput() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let screen = try TerminalScreen(directory: root)
+        var responses: [Data] = []
+        screen.response = { responses.append($0) }
+        screen.resize(TerminalSize(columns: 137, rows: 43))
+        // Codex owns its history in the alternate screen and requests SGR mouse events.
+        screen.append(Data("\u{1b}[?1049h\u{1b}[?1007l\u{1b}[?1000h\u{1b}[?1002h\u{1b}[?1003h\u{1b}[?1006hResponse".utf8))
+        screen.resize(TerminalSize(columns: 43, rows: 13))
+        let viewport = screen.snapshot(sequence: 1)
+        XCTAssertEqual(viewport.historyCount, 0)
+        XCTAssertEqual(viewport.scrollUp, Data("\u{1b}[<64;22;7M".utf8))
+        XCTAssertEqual(viewport.scrollDown, Data("\u{1b}[<65;22;7M".utf8))
+        XCTAssertTrue(responses.isEmpty, "Taking a snapshot must never send wheel input to the shell")
+        let decoded = try JSONDecoder().decode(TerminalViewport.self, from: JSONEncoder().encode(viewport))
+        XCTAssertEqual(decoded.scrollUp, viewport.scrollUp)
+        screen.append(Data("\u{1b}[?1003l".utf8))
+        XCTAssertNil(screen.snapshot(sequence: 2).scrollUp)
+        screen.append(Data("\u{1b}[?1003h\u{1b}[?1049l".utf8))
+        XCTAssertNil(screen.snapshot(sequence: 3).scrollUp)
+        var legacy = viewport
+        legacy.scrollUp = nil; legacy.scrollDown = nil
+        let oldFrame = try JSONDecoder().decode(TerminalViewport.self, from: JSONEncoder().encode(legacy))
+        XCTAssertNil(oldFrame.scrollUp)
+    }
+
     func testCurrentScreenDoesNotDependOnTransferringOldOutput() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

@@ -15,6 +15,7 @@ final class TerminalScreen: @preconcurrency TerminalDelegate {
     private var promotedRows = 0
     private var cursorVisible = true
     private(set) var error: Error?
+    private var capturedResponse: Data?
     var response: ((Data) -> Void)?
 
     init(directory: URL) throws {
@@ -73,15 +74,29 @@ final class TerminalScreen: @preconcurrency TerminalDelegate {
     }
     func showCursor(source: Terminal) { cursorVisible = true }
     func hideCursor(source: Terminal) { cursorVisible = false }
-    func send(source: Terminal, data: ArraySlice<UInt8>) { response?(Data(data)) }
+    func send(source: Terminal, data: ArraySlice<UInt8>) {
+        if capturedResponse != nil { capturedResponse?.append(contentsOf: data) }
+        else { response?(Data(data)) }
+    }
+    private func scrollEvent(button: Int) -> Data? {
+        guard terminal.isCurrentBufferAlternate, terminal.mouseMode != .off else { return nil }
+        capturedResponse = Data()
+        defer { capturedResponse = nil }
+        let flags = terminal.encodeButton(button: button, release: false, shift: false, meta: false, control: false)
+        terminal.sendEvent(buttonFlags: flags, x: terminal.cols / 2, y: terminal.rows / 2)
+        return capturedResponse
+    }
     func snapshot(sequence: UInt64) -> TerminalViewport {
         let cursor = terminal.getCursorLocation()
-        return TerminalViewport(size: TerminalSize(columns: terminal.cols, rows: terminal.rows),
+        var viewport = TerminalViewport(size: TerminalSize(columns: terminal.cols, rows: terminal.rows),
             rows: (0..<terminal.rows).map { row in
                 terminal.getLine(row: row).map { render($0, source: terminal) } ?? TerminalRow(ansi: "", columns: terminal.cols)
             }, cursorX: min(terminal.cols - 1, cursor.x), cursorY: min(terminal.rows - 1, cursor.y), cursorVisible: cursorVisible,
             applicationCursor: terminal.applicationCursor, bracketedPaste: terminal.bracketedPasteMode,
             keyboardFlags: UInt32(terminal.keyboardEnhancementFlags.rawValue), historyCount: archive.count, sequence: sequence)
+        viewport.scrollUp = scrollEvent(button: 4)
+        viewport.scrollDown = scrollEvent(button: 5)
+        return viewport
     }
     private func render(_ line: BufferLine, source: Terminal, trim: Bool = false) -> TerminalRow {
         var text = "", previous: Attribute?
