@@ -113,7 +113,10 @@ the recording, which can take time for long sessions.
 
 On iPhone, scroll backward in the terminal to load older rows automatically. There is
 no separate history menu and opening a session does not download its full recording.
-Pages contain at most 64 rows / 64 KiB; the phone retains at most 256 historical rows
+In alternate-screen applications such as Codex, history belongs to the application:
+while controlling the session, a vertical drag sends wheel events just like the Mac.
+Take control with **Write from here** to browse that application-owned history.
+Pages for normal shell history contain at most 64 rows / 64 KiB; the phone retains at most 256 historical rows
 plus the current screen. Scrolling forward fetches newer pages and returns to live
 output. New output does not move the row being read. Choosing **Write from here**
 returns to the current screen before enabling input. Both apps need this update.

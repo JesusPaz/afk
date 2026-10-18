@@ -32,6 +32,17 @@ final class RemoteModel: ObservableObject {
         }
         objectWillChange.send()
     }
+    func scrollApplication(_ lines: Int) -> Bool {
+        guard let viewport = scrollback.viewport,
+              let bytes = lines > 0 ? viewport.scrollUp : viewport.scrollDown,
+              !bytes.isEmpty, bytes.count <= 64 else { return false }
+        // Application-owned history is input, subject to the same lease and acknowledgements.
+        guard canWrite, lines != 0 else { return true }
+        var inputBytes = Data()
+        for _ in 0..<min(8, abs(lines)) { inputBytes.append(bytes) }
+        input(inputBytes)
+        return true
+    }
     private func clearHistory() {
         viewportAck?.cancel(); viewportAck = nil
         historyPageTask?.cancel(); historyPageTask = nil
@@ -79,6 +90,7 @@ final class RemoteModel: ObservableObject {
 
     init() {
         feed.onHistoryEdge = { [weak self] in self?.scrollHistory(older: $0) }
+        feed.onApplicationScroll = { [weak self] in self?.scrollApplication($0) ?? false }
         relay.onMessage = { [weak self] in self?.receive($0) }
         relay.onDisconnect = { [weak self] in
             self?.clearTerminal(); self?.sessions = []; self?.canCreate = false; self?.hostAvailable = false

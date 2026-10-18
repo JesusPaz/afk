@@ -12,6 +12,26 @@ import AFKCore
         message.historyLength = UInt64(data.count); message.historyComplete = true; message.inputAcknowledgements = true
         return message
     }
+    func testApplicationScrollDoesNotRequestArchiveInReadOnlyMode() throws {
+        let model = RemoteModel(), id = UUID().uuidString
+        var list = Message("sessions")
+        list.sessions = [SessionInfo(id: id, name: "Codex", running: true, owner: "local", epoch: 1)]
+        model.relay.onMessage?(list); model.attach(id)
+        var frame = try viewportMessage(model, session: id, count: 0)
+        var viewport = try JSONDecoder().decode(TerminalViewport.self, from: XCTUnwrap(Data(base64Encoded: frame.data!)))
+        viewport.scrollUp = Data("\u{1b}[<64;22;7M".utf8)
+        viewport.scrollDown = Data("\u{1b}[<65;22;7M".utf8)
+        let data = try JSONEncoder().encode(viewport)
+        frame.data = data.base64EncodedString(); frame.historyOffset = UInt64(data.count); frame.historyLength = UInt64(data.count)
+        model.relay.onMessage?(frame)
+        XCTAssertFalse(model.canWrite)
+        XCTAssertTrue(model.scrollApplication(3))
+        XCTAssertFalse(model.loadingHistory)
+        XCTAssertTrue(model.ready)
+        model.suspend()
+        XCTAssertFalse(model.scrollApplication(3))
+    }
+
     func testMillionLineSessionOpensWithoutDownloadingHistory() throws {
         let model = RemoteModel(), id = UUID().uuidString
         var list = Message("sessions")
