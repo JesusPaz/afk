@@ -1,13 +1,14 @@
 #!/bin/bash
 set -euo pipefail
-# Run on an ephemeral GitHub macOS runner; never on a developer's login keychain.
+# Run on an ephemeral macOS runner; never on a developer's login keychain.
 mode=${1:?mac or ios}
 [[ "$mode" == mac || "$mode" == ios ]] || exit 2
 : "${RUNNER_TEMP:?}" "${APPLE_TEAM_ID:?}" "${P12_BASE64:?}" "${P12_PASSWORD:?}"
 : "${ASC_KEY_ID:?}" "${ASC_ISSUER_ID:?}" "${ASC_KEY_BASE64:?}" "${RELEASE_TAG:?}" "${AFK_RELAY_URL:?}"
 python3 scripts/release/version.py "$RELEASE_TAG" > "$RUNNER_TEMP/afk-version"
 version=$(sed -n 's/^version=//p' "$RUNNER_TEMP/afk-version")
-build="${GITHUB_RUN_NUMBER:?}.${GITHUB_RUN_ATTEMPT:?}"
+build="${AFK_BUILD_NUMBER:-${GITHUB_RUN_NUMBER:-}.${GITHUB_RUN_ATTEMPT:-}}"
+[[ "$build" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || exit 2
 work=$(mktemp -d "$RUNNER_TEMP/afk-signing.XXXXXX")
 keychain="$work/signing.keychain-db"
 profile_path=""
@@ -33,6 +34,8 @@ security unlock-keychain -p "$password" "$keychain"
 security import "$work/certificate.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
 security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+# Archive without distribution signing so Swift package tools do not inherit an app profile.
+# exportArchive applies the real distribution identity and app provisioning profile.
 args=(-project apps/apple/AFK.xcodeproj -configuration Release -archivePath "$work/AFK.xcarchive"
     -derivedDataPath "$work/build" -skipPackagePluginValidation
     "DEVELOPMENT_TEAM=$APPLE_TEAM_ID" "MARKETING_VERSION=$version" "CURRENT_PROJECT_VERSION=$build"
@@ -40,7 +43,7 @@ args=(-project apps/apple/AFK.xcodeproj -configuration Release -archivePath "$wo
 if [[ "$mode" == mac ]]; then
     xcodebuild "${args[@]}" -scheme AFKMac -destination 'generic/platform=macOS' \
         'ARCHS=arm64 x86_64' ONLY_ACTIVE_ARCH=NO ENABLE_HARDENED_RUNTIME=YES \
-        'CODE_SIGN_IDENTITY=Developer ID Application' archive
+        CODE_SIGN_IDENTITY=- archive
 else
     : "${IOS_PROFILE_BASE64:?}"
     python3 - <<'PY'
@@ -56,7 +59,7 @@ PY
     mkdir -p "$(dirname "$profile_path")"
     cp "$work/profile.mobileprovision" "$profile_path"
     xcodebuild "${args[@]}" -scheme AFKiOS -destination 'generic/platform=iOS' \
-        'CODE_SIGN_IDENTITY=Apple Distribution' "PROVISIONING_PROFILE_SPECIFIER=$profile" archive
+        CODE_SIGNING_ALLOWED=NO archive
 fi
 export APPLE_EXPORT_MODE="$mode"
 python3 - <<'PY'
@@ -80,7 +83,8 @@ xcodebuild -exportArchive -archivePath "$work/AFK.xcarchive" -exportPath "$work/
 if [[ "$mode" == mac ]]; then
     app="$work/export/AFK.app"
     codesign --verify --deep --strict "$app"
-    lipo "$app/Contents/MacOS/AFK" -verify_arch arm64 x86_64
+    architectures=$(xcrun lipo -archs "$app/Contents/MacOS/AFK")
+    python3 -c 'import sys; assert set(sys.argv[1].split()) == {"arm64", "x86_64"}, "Mac archive must be universal"' "$architectures"
     ditto -c -k --keepParent "$app" "$work/notarize.zip"
     xcrun notarytool submit "$work/notarize.zip" --key "$work/AuthKey.p8" \
         --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait --output-format json > "$work/notary.json"

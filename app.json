@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "AFK",
+    "slug": "afk",
+    "owner": "jesuspazs-team",
+    "extra": {
+      "eas": {
+        "projectId": "c6e9a372-9e7d-4aed-8d70-0a348632bb50"
+      }
+    }
+  }
+}
