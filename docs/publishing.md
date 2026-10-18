@@ -33,7 +33,8 @@ another workflow (GitHub suppresses that recursive trigger).
 Mac artifacts: `AFK-v<version>-macOS.dmg`, `AFK-v<version>-macOS.zip`, `SHA256SUMS`, `relay-image.txt`, and
 `afk.rb` / `afk@preview.rb`. Both containers hold the Developer ID-signed, stapled app for Apple Silicon and
 Intel. The DMG includes an Applications shortcut for drag-and-drop installation.
-Homebrew downloads the DMG, verifies its SHA-256 and requires macOS 14+.
+Homebrew downloads the ZIP, verifies its SHA-256 and requires macOS 14+.
+Using the ZIP avoids disk-image mount conflicts during automated installation.
 No unsigned fallback and no `sha256 :no_check`.
 
 ## GitHub and Apple setup
@@ -118,7 +119,7 @@ Keychain profile; exporting the signing key to GitHub is not required. Do not ru
    it to notarytool, wait for Accepted, and staple/validate its ticket. Verify both
    the app and DMG with Gatekeeper. Calculate SHA-256 after stapling and publish
    those exact bytes to the release at the tested SHA. Generate the cask with
-   `python3 scripts/release/cask.py <tag> <dmg> <afk@preview.rb>`.
+   `python3 scripts/release/cask.py <tag> <zip> <afk@preview.rb>`.
 
 Keychain can require the Mac user's local approval when codesign accesses the
 private key. Do not reset the keychain or change its access controls to avoid that
