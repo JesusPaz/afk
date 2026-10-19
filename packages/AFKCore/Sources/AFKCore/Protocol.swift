@@ -9,6 +9,10 @@ public struct SessionInfo: Codable, Identifiable, Equatable {
     public var canControl: Bool?
     public var canTerminate: Bool?
     public var controlExpiresAt: Date?
+    public var group: SessionGroup?
+    public var context: String?
+    public var closing: Bool?
+    public var canRemove: Bool?
     public init(id: String, name: String, running: Bool, owner: String, epoch: UInt64) {
         self.id = id; self.name = name; self.running = running; self.owner = owner; self.epoch = epoch
     }

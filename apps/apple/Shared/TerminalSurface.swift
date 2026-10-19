@@ -131,9 +131,35 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
     var observation: UUID?
     private var replaying = false
     private var attaching = false
-    var active = true
+    var active = true { didSet { if !active { cancelApplicationScroll() } } }
     private var presentationStart: UInt64?
     private var scrollTranslation: CGFloat = 0
+    private var applicationScrollSteps = 0
+    private var applicationScrollTask: Task<Void, Never>?
+    private func cancelApplicationScroll() {
+        applicationScrollTask?.cancel(); applicationScrollTask = nil; applicationScrollSteps = 0
+    }
+    private func queueApplicationScroll(_ lines: Int) {
+        if lines != 0 && (lines > 0) != (applicationScrollSteps > 0) { applicationScrollSteps = 0 }
+        applicationScrollSteps = max(-64, min(64, applicationScrollSteps + lines))
+        guard applicationScrollTask == nil, applicationScrollSteps != 0 else { return }
+        drainApplicationScroll()
+        applicationScrollTask = Task { [weak self] in
+            while true {
+                do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+                guard let self else { return }
+                guard self.active, self.applicationScrollSteps != 0 else {
+                    self.applicationScrollTask = nil; return
+                }
+                self.drainApplicationScroll()
+            }
+        }
+    }
+    private func drainApplicationScroll() {
+        let steps = max(-8, min(8, applicationScrollSteps))
+        applicationScrollSteps -= steps
+        if feed.onApplicationScroll?(steps) != true { cancelApplicationScroll() }
+    }
     private var proposed: TerminalSize?
     private var pending: DispatchWorkItem?
     init(feed: TerminalFeed, editable: Bool, input: @escaping (Data) -> Void, resize: @escaping (TerminalSize) -> Void) {
@@ -142,6 +168,7 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
     func attach(_ container: TerminalContainer) {
         let view = container.terminal
         view.terminalDelegate = self
+        feed.onCancelApplicationScroll = { [weak self] in self?.cancelApplicationScroll() }
         #if os(iOS)
         view.alwaysBounceVertical = true
         view.panGestureRecognizer.addTarget(self, action: #selector(historyPan(_:)))
@@ -159,6 +186,7 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
         observation = feed.observe(replayHistory: restoreHistory) { [weak self, weak container] events, reset in
             guard let self, let container else { return }
             let view = container.terminal
+            if self.feed.presentationStart == nil { self.cancelApplicationScroll() }
             #if os(iOS)
             // UIKit momentum can move the visible viewport without advancing SwiftTerm's yDisp.
             let rowHeight = view.getOptimalFrameSize().height / CGFloat(view.getTerminal().rows)
@@ -194,8 +222,8 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
             self.replaying = false
         }
     }
-    func detach() { pending?.cancel(); if let observation { feed.remove(observation) } }
-    func send(source: TerminalView, data: ArraySlice<UInt8>) { if editable && !replaying && !attaching { input(Data(data)) } }
+    func detach() { cancelApplicationScroll(); feed.onCancelApplicationScroll = nil; pending?.cancel(); if let observation { feed.remove(observation) } }
+    func send(source: TerminalView, data: ArraySlice<UInt8>) { if active && editable && !replaying && !attaching { input(Data(data)) } }
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
     func setTerminalTitle(source: TerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
@@ -206,14 +234,16 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
     }
     #if os(iOS)
     @objc func historyPan(_ gesture: UIPanGestureRecognizer) {
-        if gesture.state == .began { scrollTranslation = 0 }
-        guard !replaying, !attaching, gesture.state == .changed,
+        if gesture.state == .began { scrollTranslation = 0; cancelApplicationScroll() }
+        if gesture.state == .cancelled || gesture.state == .failed { cancelApplicationScroll(); return }
+        guard !replaying, !attaching, (gesture.state == .changed || gesture.state == .ended),
               let view = gesture.view as? TerminalView, feed.presentationStart != nil else { return }
         let motion = gesture.translation(in: view)
         guard abs(motion.y) > abs(motion.x), abs(motion.y) > 12 else { return }
         let lines = Int((motion.y - scrollTranslation) / 24)
-        if feed.onApplicationScroll?(lines) == true {
-            if lines != 0 { scrollTranslation = motion.y }
+        if feed.onApplicationScroll?(0) == true {
+            scrollTranslation += CGFloat(lines) * 24
+            queueApplicationScroll(lines)
             return
         }
         if motion.y > 0 && view.contentOffset.y < 40 { feed.onHistoryEdge?(true) }
@@ -248,6 +278,7 @@ struct TerminalSurface: NSViewRepresentable {
     func updateNSView(_ view: TerminalContainer, context: Context) {
         let gainedControl = active && (!context.coordinator.active || (editable && !context.coordinator.editable))
         context.coordinator.active = active
+        if !active, view.window?.firstResponder === view.terminal { view.window?.makeFirstResponder(nil) }
         view.observing = !editable
         context.coordinator.editable = editable
         context.coordinator.input = input; context.coordinator.resize = resize
@@ -267,11 +298,13 @@ struct TerminalSurface: UIViewRepresentable {
     func makeCoordinator() -> TerminalCoordinator { TerminalCoordinator(feed: feed, editable: editable, input: input, resize: resize) }
     func makeUIView(context: Context) -> TerminalContainer {
         let view = TerminalContainer(frame: .zero)
+        context.coordinator.active = active
         context.coordinator.attach(view); return view
     }
     func updateUIView(_ view: TerminalContainer, context: Context) {
+        context.coordinator.active = active
         context.coordinator.editable = editable; context.coordinator.input = input; context.coordinator.resize = resize
-        if !editable && view.terminal.isFirstResponder { _ = view.terminal.resignFirstResponder() }
+        if (!active || !editable) && view.terminal.isFirstResponder { _ = view.terminal.resignFirstResponder() }
     }
     static func dismantleUIView(_ view: TerminalContainer, coordinator: TerminalCoordinator) { coordinator.detach() }
 }
@@ -306,7 +339,12 @@ struct SavedTerminalHistory: View {
                 List(selection: $selected) {
                     ForEach(entries) { entry in
                         VStack(alignment: .leading) {
-                            Text(entry.name)
+                            HStack {
+                                SessionGroupMark(group: entry.group)
+                                Text(entry.name)
+                            }
+                            if let group = entry.group { Text(group.name).font(.caption).foregroundStyle(.secondary) }
+                            if let context = entry.context { Text(context).font(.caption).foregroundStyle(.secondary) }
                             Text(entry.created.formatted()).font(.caption).foregroundStyle(.secondary)
                         }.tag(entry.id)
                     }

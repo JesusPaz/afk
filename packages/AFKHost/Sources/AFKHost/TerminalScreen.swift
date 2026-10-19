@@ -17,6 +17,10 @@ final class TerminalScreen: @preconcurrency TerminalDelegate {
     private(set) var error: Error?
     private var capturedResponse: Data?
     var response: ((Data) -> Void)?
+    var titleChanged: ((String) -> Void)?
+    var directoryChanged: ((String?) -> Void)?
+    func setTerminalTitle(source: Terminal, title: String) { titleChanged?(title) }
+    func hostCurrentDirectoryUpdated(source: Terminal) { directoryChanged?(source.hostCurrentDirectory) }
 
     init(directory: URL) throws {
         archive = try TerminalRowStore(directory: directory)

@@ -28,10 +28,9 @@ import XCTest
         let start = state.start, rows = state.rows
         state.update(viewport(count: 1_000_100, sequence: 2))
         XCTAssertEqual(state.start, start); XCTAssertEqual(state.rows, rows)
-        let next = try XCTUnwrap(state.request(older: false))
-        XCTAssertEqual(next.historyStart, state.end)
         let end = state.end
-        XCTAssertTrue(state.accept(page(next, first: end, last: end + 64)))
+        XCTAssertNil(state.request(older: false), "Recently visited rows come from cache")
+        XCTAssertEqual(state.end, end + 64)
         XCTAssertLessThanOrEqual(state.rows.count, 256)
     }
     func testStalePagesCannotPopulateNewSessionAndReturningToLiveNeedsNoReplay() throws {
@@ -44,6 +43,65 @@ import XCTest
         state.clear(); state.update(viewport(count: 3))
         XCTAssertFalse(state.accept(page(request, first: 0, last: 64)))
         XCTAssertTrue(state.rows.isEmpty)
+    }
+    func testPrefetchDoesNotRenderAndScrollUsesItWithoutNetwork() throws {
+        let state = RemoteScrollback(feed: TerminalFeed())
+        state.update(viewport(count: 1000))
+        let request = try XCTUnwrap(state.prefetch())
+        XCTAssertFalse(state.waitingForHistory)
+        XCTAssertTrue(state.accept(page(request, first: 936, last: 1000)))
+        XCTAssertFalse(state.browsing); XCTAssertTrue(state.rows.isEmpty)
+        XCTAssertNil(state.request(older: true))
+        XCTAssertEqual(state.start, 936); XCTAssertEqual(state.rows.count, 64)
+        state.returnToLive()
+        XCTAssertNil(state.request(older: true))
+        XCTAssertEqual(state.start, 936)
+    }
+    func testScrollPromotesInflightPrefetchAndRejectsStaleResponseAfterClear() throws {
+        let state = RemoteScrollback(feed: TerminalFeed())
+        state.update(viewport(count: 1000))
+        let request = try XCTUnwrap(state.prefetch())
+        XCTAssertNil(state.request(older: true)); XCTAssertTrue(state.waitingForHistory)
+        XCTAssertTrue(state.accept(page(request, first: 936, last: 1000)))
+        XCTAssertEqual(state.start, 936)
+        let next = try XCTUnwrap(state.prefetch())
+        state.clear(); state.update(viewport(count: 1000))
+        XCTAssertFalse(state.accept(page(next, first: 872, last: 936)))
+        XCTAssertEqual(state.cachedRowCount, 0)
+    }
+    func testLiveOutputDuringPrefetchDoesNotJoinNoncontiguousRows() throws {
+        let state = RemoteScrollback(feed: TerminalFeed())
+        state.update(viewport(count: 1000))
+        let old = try XCTUnwrap(state.prefetch())
+        state.update(viewport(count: 1010, sequence: 2))
+        let current = try XCTUnwrap(state.request(older: true))
+        XCTAssertEqual(current.historyBefore, 1010)
+        XCTAssertFalse(state.accept(page(old, first: 936, last: 1000)))
+        XCTAssertTrue(state.accept(page(current, first: 946, last: 1010)))
+        XCTAssertEqual(state.end, 1010)
+    }
+    func testApplicationOwnedHistoryIsNotPrefetched() {
+        let state = RemoteScrollback(feed: TerminalFeed())
+        var screen = viewport(count: 1000)
+        screen.scrollUp = Data([1]); screen.scrollDown = Data([2])
+        state.update(screen)
+        XCTAssertNil(state.prefetch())
+    }
+    func testCacheRemainsBoundedAcrossLongHistory() throws {
+        let state = RemoteScrollback(feed: TerminalFeed())
+        state.update(viewport(count: 100_000))
+        for n in 0..<1600 {
+            let end = UInt64(100_000 - 64 * n)
+            if end == 0 { break }
+            let request = try XCTUnwrap(state.request(older: true))
+            var reply = page(request, first: end > 64 ? end - 64 : 0, last: end)
+            reply.historyRows = reply.historyRows?.map { TerminalRow(ansi: String(repeating: "x", count: 900), columns: $0.columns) }
+            XCTAssertTrue(state.accept(reply))
+            XCTAssertLessThanOrEqual(state.cachedRowCount, 4096)
+            XCTAssertLessThanOrEqual(state.cachedBytes, 1024 * 1024)
+            XCTAssertLessThanOrEqual(state.rows.count, 256)
+            if end <= 64 { break }
+        }
     }
     func testDiskIndexReadsBothDirectionsWithoutLoadingFullHistory() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

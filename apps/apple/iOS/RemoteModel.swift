@@ -18,38 +18,84 @@ final class RemoteModel: ObservableObject {
     private lazy var scrollback = RemoteScrollback(feed: feed)
     @Published var loadingHistory = false
     private var viewportAck: Task<Void, Never>?
-    private var historyPageTask: Task<Void, Never>?
+    private var prefetchedHistory = false
     func scrollHistory(older: Bool) {
-        guard ready || selectedInfo?.running == false, let viewportID else { return }
-        if var request = scrollback.request(older: older) {
-            request.sessionID = selected; request.viewportID = viewportID
-            loadingHistory = true
-            historyPageTask = Task { [weak self] in
-                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
-                guard let self, self.viewportID == viewportID else { return }
-                self.relay.send(request)
-            }
-        }
+        guard ready || selectedInfo?.running == false, viewportID != nil else { return }
+        sendHistory(scrollback.request(older: older))
+        sendHistory(scrollback.prefetch(older: older))
+        loadingHistory = scrollback.waitingForHistory
         objectWillChange.send()
+    }
+    private func sendHistory(_ request: Message?) {
+        guard var request, let viewportID else { return }
+        request.sessionID = selected; request.viewportID = viewportID
+        relay.send(request)
     }
     func scrollApplication(_ lines: Int) -> Bool {
         guard let viewport = scrollback.viewport,
               let bytes = lines > 0 ? viewport.scrollUp : viewport.scrollDown,
               !bytes.isEmpty, bytes.count <= 64 else { return false }
         // Application-owned history is input, subject to the same lease and acknowledgements.
-        guard canWrite, lines != 0 else { return true }
+        guard lines != 0 else { return true }
+        guard canWrite else { return false }
         var inputBytes = Data()
         for _ in 0..<min(8, abs(lines)) { inputBytes.append(bytes) }
         input(inputBytes)
         return true
     }
+    private func cancelInput() {
+        inputBuffer.cancel()
+        feed.onCancelApplicationScroll?()
+    }
     private func clearHistory() {
         viewportAck?.cancel(); viewportAck = nil
-        historyPageTask?.cancel(); historyPageTask = nil
+        prefetchedHistory = false
         viewportID = nil; viewportBytes = Data(); viewportSequence = nil
         scrollback.clear(); loadingHistory = false
     }
     @Published var sessions: [SessionInfo] = []
+    @Published private(set) var hiddenSessionIDs: Set<String> = []
+    @Published var lastHiddenSessionID: String?
+    private let preferences: UserDefaults
+    private var hiddenHostID: String?
+    var visibleSessions: [SessionInfo] { sessions.filter { !hiddenSessionIDs.contains($0.id) } }
+    var hiddenSessions: [SessionInfo] { sessions.filter { hiddenSessionIDs.contains($0.id) } }
+    func loadHiddenSessions(hostID: String) {
+        hiddenHostID = hostID
+        hiddenSessionIDs = Set(preferences.stringArray(forKey: "hiddenSessions." + hostID) ?? [])
+        lastHiddenSessionID = nil
+    }
+    func hideSession(_ id: String) {
+        guard sessions.contains(where: { $0.id == id }) else { return }
+        if selected == id { leave() }
+        hiddenSessionIDs.insert(id); lastHiddenSessionID = id
+        saveHiddenSessions()
+    }
+    func showSession(_ id: String) {
+        hiddenSessionIDs.remove(id)
+        if lastHiddenSessionID == id { lastHiddenSessionID = nil }
+        saveHiddenSessions()
+    }
+    private func saveHiddenSessions() {
+        guard let hiddenHostID else { return }
+        preferences.set(Array(hiddenSessionIDs).sorted(), forKey: "hiddenSessions." + hiddenHostID)
+    }
+    func closeActionTitle(_ session: SessionInfo) -> String {
+        L10n.text(session.canRemove == true ? (session.running ? "Cerrar y quitar…" : "Quitar de la lista") : "Terminar sesión")
+    }
+    func canCloseSession(_ session: SessionInfo) -> Bool {
+        hostAvailable && session.canTerminate == true && session.closing != true && (session.running || session.canRemove == true)
+    }
+    func closeSession(_ id: String) {
+        guard hostAvailable, let info = sessions.first(where: { $0.id == id }),
+              canCloseSession(info) else { return }
+        guard info.canRemove == true else {
+            relay.send(Message("terminate", sessionID: id)); return
+        }
+        if selected == id { release(); ready = false; clearHistory() }
+        if let index = sessions.firstIndex(where: { $0.id == id }) { sessions[index].closing = true }
+        relay.send(Message("closeAndRemove", sessionID: id))
+    }
     @Published var selected: String?
     @Published var error: String?
     @Published var status = L10n.text("Sin conexión")
@@ -74,21 +120,23 @@ final class RemoteModel: ObservableObject {
     var selectedInfo: SessionInfo? { sessions.first { $0.id == selected } }
     var terminalStatus: String {
         if !hostAvailable { return L10n.text("Sin conexión. Reintenta para continuar.") }
+        if selectedInfo?.closing == true { return L10n.text("Cerrando…") }
         if selectedInfo?.running == false { return L10n.text("Sesión terminada") }
         if !ready { return L10n.text(sessionNotice == nil ? "Recuperando la sesión…" : "No se pudo abrir la sesión") }
         return L10n.text(canWrite ? "Estás escribiendo desde el iPhone" : "Estás viendo la sesión")
     }
-    var canClaim: Bool { ready && inputAcknowledgements && selectedInfo?.canControl == true }
-    var canTerminate: Bool { ready && selectedInfo?.canTerminate == true }
+    var canClaim: Bool { selectedInfo?.closing != true && ready && inputAcknowledgements && selectedInfo?.canControl == true }
+    var canTerminate: Bool { selectedInfo.map(canCloseSession) ?? false }
     var canWrite: Bool { canClaim && !scrollback.browsing && owner == credentials?.clientID }
     private func clearTerminal() {
         if inputBuffer.hasPendingInput { sessionNotice = L10n.text("Hay entrada sin confirmar. Revisa la terminal antes de volver a escribir.") }
-        inputBuffer.cancel()
+        cancelInput()
         ready = false; owner = ""; epoch = 0; inputSequence = 0
         clearHistory()
     }
 
-    init() {
+    init(preferences: UserDefaults = .standard) {
+        self.preferences = preferences
         feed.onHistoryEdge = { [weak self] in self?.scrollHistory(older: $0) }
         feed.onApplicationScroll = { [weak self] in self?.scrollApplication($0) ?? false }
         relay.onMessage = { [weak self] in self?.receive($0) }
@@ -107,7 +155,7 @@ final class RemoteModel: ObservableObject {
     func restore() {
         do {
             if let saved = try relay.restore() {
-                credentials = saved.credentials; hostName = saved.credentials.host.name; linked = true; reconnect()
+                credentials = saved.credentials; loadHiddenSessions(hostID: saved.credentials.host.id); hostName = saved.credentials.host.name; linked = true; reconnect()
             }
         } catch { self.error = error.localizedDescription }
     }
@@ -124,12 +172,13 @@ final class RemoteModel: ObservableObject {
             guard generation == pairingGeneration else { throw SecureError.disconnected }
             let saved = try await relay.pair(invitation: invitation)
             credentials = saved.credentials
+            loadHiddenSessions(hostID: saved.credentials.host.id)
             hostName = saved.credentials.host.name; linked = true; error = nil
         } catch { self.error = error.localizedDescription }
     }
     func reconnect() {
         guard !unlock.isBusy, !reconnecting, !pairing else { return }
-        inputBuffer.cancel()
+        cancelInput()
         clearHistory()
         ready = false; reconnecting = true
         Task {
@@ -142,16 +191,17 @@ final class RemoteModel: ObservableObject {
         }
     }
     func attach(_ id: String) {
+        guard sessions.contains(where: { $0.id == id }), !hiddenSessionIDs.contains(id) else { return }
         if selected != id { release(); epoch = 0; inputSequence = 0 }
-        inputBuffer.cancel()
+        cancelInput()
         selected = id; ready = false; sessionNotice = nil
         clearHistory()
         viewportID = UUID().uuidString
         var request = Message("attach", sessionID: id); request.viewportID = viewportID
         relay.send(request)
     }
-    func claim() { guard canClaim else { return }; historyPageTask?.cancel(); scrollback.returnToLive(); loadingHistory = false; relay.send(Message("claim", sessionID: selected)); objectWillChange.send() }
-    func release() { inputBuffer.cancel(); if owner == credentials?.clientID { relay.send(Message("release", sessionID: selected)) }; owner = "" }
+    func claim() { guard canClaim else { return }; scrollback.returnToLive(); loadingHistory = false; relay.send(Message("claim", sessionID: selected)); objectWillChange.send() }
+    func release() { cancelInput(); if owner == credentials?.clientID { relay.send(Message("release", sessionID: selected)) }; owner = "" }
     func leave() { release(); selected = nil; ready = false; clearHistory() }
     func suspend() { cancelPairing(); unlock.invalidate(); release(); relay.disconnect(); ready = false; sessions = []; clearHistory() }
     func resize(_ size: TerminalSize) {
@@ -174,7 +224,7 @@ final class RemoteModel: ObservableObject {
         }
     }
     private func sendInput(_ bytes: Data, retry: UInt64?) -> UInt64? {
-        guard canClaim, owner == credentials?.clientID else { inputBuffer.cancel(); return nil }
+        guard canClaim, owner == credentials?.clientID else { cancelInput(); return nil }
         if retry == nil { inputSequence += 1 }
         var m = Message("input", sessionID: selected); m.epoch = epoch; m.sequence = retry ?? inputSequence; m.data = bytes.base64EncodedString(); relay.send(m)
         return m.sequence
@@ -185,12 +235,12 @@ final class RemoteModel: ObservableObject {
         switch m.type {
         case "welcome": relay.send(Message("list"))
         case "hostOnline": hostAvailable = true; relay.send(Message("list")); if let selected { attach(selected) }
-        case "hostOffline": clearHistory(); inputBuffer.cancel(); hostAvailable = false; ready = false; owner = ""; status = L10n.text("El Mac no está disponible")
+        case "hostOffline": clearHistory(); cancelInput(); hostAvailable = false; ready = false; owner = ""; status = L10n.text("El Mac no está disponible")
         case "sessions":
             hostAvailable = true; sessions = m.sessions ?? []; canCreate = m.canCreate == true
             if let selected, !sessions.contains(where: { $0.id == selected }) {
                 clearTerminal(); self.selected = nil; sessionNotice = L10n.text("El Mac retiró el acceso a esta sesión.")
-            } else if !canClaim { inputBuffer.cancel(); owner = "" }
+            } else if !canClaim { cancelInput(); owner = "" }
 
         case "viewport":
             guard m.sessionID == selected, selectedInfo != nil, let id = viewportID, m.viewportID == id,
@@ -210,9 +260,13 @@ final class RemoteModel: ObservableObject {
                       (0..<viewport.size.columns).contains(viewport.cursorX), (0..<viewport.size.rows).contains(viewport.cursorY) else { return }
                 scrollback.update(viewport); viewportBytes = Data()
                 inputAcknowledgements = m.inputAcknowledgements == true
-                if owner != (m.owner ?? "") || epoch != m.epoch { inputBuffer.cancel() }
+                if owner != (m.owner ?? "") || epoch != m.epoch { cancelInput() }
                 owner = m.owner ?? ""; if epoch != m.epoch { inputSequence = 0 }; epoch = m.epoch ?? 0
                 ready = true; sendSize(); objectWillChange.send()
+                if !prefetchedHistory {
+                    prefetchedHistory = true
+                    sendHistory(scrollback.prefetch())
+                }
             }
             var ack = Message("viewportNext", sessionID: selected)
             ack.viewportID = id; ack.sequence = sequence; ack.historyOffset = offset
@@ -224,7 +278,12 @@ final class RemoteModel: ObservableObject {
             }
         case "historyPage":
             guard m.sessionID == selected, let id = viewportID, m.viewportID == id else { return }
-            if scrollback.accept(m) { loadingHistory = false; objectWillChange.send() }
+            let foreground = scrollback.waitingForHistory
+            let older = scrollback.pending?.older ?? true
+            if scrollback.accept(m) {
+                if foreground { sendHistory(scrollback.prefetch(older: older)) }
+                loadingHistory = scrollback.waitingForHistory; objectWillChange.send()
+            }
         case "terminalResponse":
             guard canClaim, owner == credentials?.clientID, m.sessionID == selected, m.owner == owner, m.epoch == epoch,
                   let bytes = m.data.flatMap({ Data(base64Encoded: $0) }) else { return }
@@ -235,7 +294,7 @@ final class RemoteModel: ObservableObject {
         case "snapshot":
             guard m.sessionID == selected, selectedInfo != nil, let events = m.events, feed.reset(events, sequence: m.sequence ?? 0) else { return }
             viewportID = nil
-            if owner != (m.owner ?? "") || epoch != m.epoch { inputBuffer.cancel() }
+            if owner != (m.owner ?? "") || epoch != m.epoch { cancelInput() }
             inputAcknowledgements = m.inputAcknowledgements == true
             if !inputAcknowledgements { sessionNotice = L10n.text("Actualiza AFK en el Mac para escribir con confirmación de entrega.") }
             owner = m.owner ?? ""; if epoch != m.epoch { inputSequence = 0 }; epoch = m.epoch ?? 0; ready = true; sendSize()
@@ -247,18 +306,19 @@ final class RemoteModel: ObservableObject {
             }
             if let data = m.data.flatMap({ Data(base64Encoded: $0) }) { feed.sequence = sequence; feed.append(data) }
         case "control":
-            guard m.sessionID == selected else { return }; if owner != (m.owner ?? "") || epoch != m.epoch { inputBuffer.cancel() }
+            guard m.sessionID == selected else { return }; if owner != (m.owner ?? "") || epoch != m.epoch { cancelInput() }
             owner = m.owner ?? ""; if epoch != m.epoch { inputSequence = 0 }; epoch = m.epoch ?? 0; sendSize()
         case "inputAck":
             guard m.sessionID == selected, m.epoch == epoch, let sequence = m.sequence else { return }
             inputBuffer.acknowledge(sequence)
         case "exit":
             if m.sessionID == selected {
-                inputBuffer.cancel(); ready = false; owner = ""; sessionNotice = L10n.text("Sesión terminada")
+                cancelInput(); ready = false; owner = ""; sessionNotice = L10n.text("Sesión terminada")
                 if let index = sessions.firstIndex(where: { $0.id == selected }) { sessions[index].running = false }
             }
         case "error":
-            if let sessionID = m.sessionID, sessionID == selected { viewportAck?.cancel(); viewportID = nil; loadingHistory = false; inputBuffer.cancel(); ready = false; sessionNotice = m.message.map { L10n.text($0) } }
+            if let index = sessions.firstIndex(where: { $0.id == m.sessionID }) { sessions[index].closing = false }
+            if let sessionID = m.sessionID, sessionID == selected { viewportAck?.cancel(); viewportID = nil; loadingHistory = false; cancelInput(); ready = false; sessionNotice = m.message.map { L10n.text($0) } }
             else { error = m.message.map { L10n.text($0) } }
         default: break
         }

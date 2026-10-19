@@ -140,7 +140,7 @@ import AFKCore
         XCTAssertTrue(restored.accessEvents.contains { $0.kind == .stopped })
         XCTAssertEqual(restored.access.level(client: client, session: session.id), .none)
     }
-    func testCreationCannotAdoptExistingSessionAndCloseRequiresSeparatePermission() throws {
+    func testCreationCannotAdoptExistingSessionAndCloseRequiresSeparatePermission() async throws {
         let host = HostController(preferences: UserDefaults(suiteName: UUID().uuidString)!)
         defer { host.shutdown() }
         let client = UUID().uuidString, existing = try XCTUnwrap(host.create())
@@ -154,8 +154,16 @@ import AFKCore
         XCTAssertEqual(host.access.level(client: "another", session: id), .none)
         var close = Message("terminate", sessionID: id); close.clientID = client; host.receive(close)
         XCTAssertTrue(created.running)
+        close.type = "closeAndRemove"; host.receive(close)
+        XCTAssertTrue(created.running); XCTAssertFalse(created.closing)
         host.access.set(client: client, session: id, level: .readOnly, duration: 60, allowClose: true)
-        host.receive(close); XCTAssertFalse(created.running); XCTAssertTrue(existing.running)
+        XCTAssertEqual(host.visibleSessions(for: client).first(where: { $0.id == id })?.canRemove, true)
+        host.receive(close)
+        XCTAssertTrue(created.running); XCTAssertTrue(created.closing)
+        for _ in 0..<100 where created.running { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(created.running); XCTAssertTrue(existing.running)
+        XCTAssertFalse(host.sessions.contains { $0.id == id })
+        XCTAssertEqual(host.access.level(client: client, session: id), .none)
     }
     func testHistoryIsBoundedAndNeverContainsTerminalData() throws {
         let prefs = UserDefaults(suiteName: UUID().uuidString)!

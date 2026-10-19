@@ -13,6 +13,20 @@ public struct HostSecret: Codable {
 public final class HostController: ObservableObject {
     public let relay = SecureHostRelay()
     @Published public private(set) var sessions: [HostSession] = []
+    @Published public private(set) var groups: [SessionGroup] = []
+    private struct Organization: Codable {
+        var version = 1
+        var groups: [SessionGroup] = []
+        var sessions: [String: Metadata] = [:]
+    }
+    private struct Metadata: Codable {
+        var label: String?
+        var groupID: String?
+        var hidden: Bool
+    }
+    private var organization = Organization()
+    private var removalRequested: Set<String> = []
+    private var deletedGroupPositions: [String: Int] = [:]
     @Published public private(set) var host: HostIdentity?
     @Published public private(set) var pairing: Pairing?
     @Published public private(set) var clients: [PairedClient] = []
@@ -48,6 +62,10 @@ public final class HostController: ObservableObject {
     public init(preferences: UserDefaults = .standard, access: RemoteAccess? = nil, historyDirectory: URL? = nil) {
         self.historyDirectory = historyDirectory
         self.preferences = preferences
+        if let data = preferences.data(forKey: "sessionOrganization"),
+           let saved = try? JSONDecoder().decode(Organization.self, from: data), saved.version == 1 {
+            organization = saved; groups = saved.groups
+        }
         self.access = access ?? RemoteAccess(); history = AccessHistory(preferences: preferences)
         remoteAccessPaused = preferences.bool(forKey: "remoteAccessPaused")
         relay.onPairingEnded = { [weak self] in self?.pairing = nil }
@@ -71,14 +89,97 @@ public final class HostController: ObservableObject {
     @discardableResult
     public func create(name: String = "Shell", id: String = UUID().uuidString) -> HostSession? {
         if let existing = sessions.first(where: { $0.id == id }) { return existing }
-        guard sessions.count < 8 else { error = L10n.text("El POC permite hasta ocho sesiones."); return nil }
+        guard sessions.filter({ $0.running }).count < 8 else { error = L10n.text("El POC permite hasta ocho sesiones."); return nil }
         let recording: TerminalHistory?
         do { recording = try historyDirectory.map { try TerminalHistory(root: $0, name: String(name.prefix(60))) } }
         catch { self.error = error.localizedDescription; return nil }
         let session = HostSession(id: id, name: String(name.prefix(60)), history: recording)
         session.onEvent = { [weak self] in self?.forward($0) }
-        session.onState = { [weak self] in self?.publishSessions() }
-        sessions.append(session); session.start(); publishSessions(); return session
+        if let metadata = organization.sessions[id] {
+            session.rename(metadata.label)
+            session.groupID = groups.contains(where: { $0.id == metadata.groupID }) ? metadata.groupID : nil
+            session.isHidden = metadata.hidden
+        }
+        session.onState = { [weak self, weak session] in
+            guard let self, let session else { return }
+            if !session.running && self.removalRequested.contains(session.id) { self.removeEnded(id: session.id) }
+            else { self.persistOrganization(); self.publishSessions() }
+        }
+        sessions.append(session); persistOrganization(); session.start(); publishSessions(); return session
+    }
+    private func persistOrganization() {
+        for session in sessions {
+            do { try session.feed.history?.updateMetadata(name: session.name, context: session.context,
+                group: groups.first(where: { $0.id == session.groupID }), sessionID: session.id) }
+            catch { self.error = error.localizedDescription }
+        }
+        organization.groups = groups
+        organization.sessions = Dictionary(uniqueKeysWithValues: sessions.map {
+            ($0.id, Metadata(label: $0.userLabel, groupID: $0.groupID, hidden: $0.isHidden))
+        })
+        if let data = try? JSONEncoder().encode(organization) { preferences.set(data, forKey: "sessionOrganization") }
+    }
+    private func organizationChanged() { persistOrganization(); publishSessions() }
+    public func renameSession(id: String, label: String?) { sessions.first(where: { $0.id == id })?.rename(label) }
+    public func setHidden(id: String, hidden: Bool) {
+        sessions.first(where: { $0.id == id })?.isHidden = hidden; organizationChanged()
+    }
+    public func moveSession(id: String, groupID: String?) {
+        guard groupID == nil || groups.contains(where: { $0.id == groupID }) else { return }
+        sessions.first(where: { $0.id == id })?.groupID = groupID; organizationChanged()
+    }
+    @discardableResult public func createGroup(name: String, symbol: String = "folder", color: String = "blue") -> SessionGroup? {
+        guard let name = SessionMetadata.clean(name), groups.count < 64 else { return nil }
+        let group = SessionGroup(name: name, symbol: SessionGroup.symbols.contains(symbol) ? symbol : "folder",
+                                 color: SessionGroup.colors.contains(color) ? color : "blue")
+        groups.append(group); organizationChanged(); return group
+    }
+    public func updateGroup(_ group: SessionGroup) {
+        guard let index = groups.firstIndex(where: { $0.id == group.id }), let name = SessionMetadata.clean(group.name) else { return }
+        groups[index] = SessionGroup(id: group.id, name: name, symbol: SessionGroup.symbols.contains(group.symbol) ? group.symbol : "folder",
+                                    color: SessionGroup.colors.contains(group.color) ? group.color : "blue")
+        organizationChanged()
+    }
+    public func deleteGroup(id: String) {
+        if let index = groups.firstIndex(where: { $0.id == id }) { deletedGroupPositions = [id: index] }
+        groups.removeAll { $0.id == id }
+        for session in sessions where session.groupID == id { session.groupID = nil }
+        organizationChanged()
+    }
+    public func restoreGroup(_ group: SessionGroup, sessionIDs: [String]) {
+        guard !groups.contains(where: { $0.id == group.id }), groups.count < 64 else { return }
+        let index = min(groups.count, deletedGroupPositions.removeValue(forKey: group.id) ?? groups.count)
+        groups.insert(group, at: index)
+        for session in sessions where session.groupID == nil && sessionIDs.contains(session.id) { session.groupID = group.id }
+        organizationChanged()
+    }
+    public func reorderGroup(id: String, offset: Int) {
+        guard let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        let destination = max(0, min(groups.count - 1, index + offset))
+        let group = groups.remove(at: index); groups.insert(group, at: destination); organizationChanged()
+    }
+    public func reorderSession(id: String, offset: Int) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        let peers = sessions.indices.filter { sessions[$0].groupID == sessions[index].groupID && sessions[$0].isHidden == sessions[index].isHidden }
+        guard let position = peers.firstIndex(of: index) else { return }
+        let destination = peers[max(0, min(peers.count - 1, position + offset))]
+        sessions.swapAt(index, destination); organizationChanged()
+    }
+    public func closeAndRemove(id: String) {
+        guard let session = sessions.first(where: { $0.id == id }) else { return }
+        removalRequested.insert(id)
+        if session.running { session.terminate() } else { removeEnded(id: id) }
+    }
+    public func forceClose(id: String) {
+        guard let session = sessions.first(where: { $0.id == id }) else { return }
+        removalRequested.insert(id); session.forceClose()
+    }
+    public func removeEnded(id: String) {
+        guard let session = sessions.first(where: { $0.id == id }), !session.running else { return }
+        session.flushOutput(); session.feed.synchronizeHistory(); persistOrganization()
+        views = views.filter { $0.value.session != id }; access.remove(session: id)
+        session.onState = nil; session.onEvent = nil
+        sessions.removeAll { $0.id == id }; removalRequested.remove(id); organizationChanged()
     }
     public func restoreConnection(server: String) async {
         guard !restoredConnection else { return }
@@ -159,7 +260,7 @@ public final class HostController: ObservableObject {
         do { try relay.cancelInvitation() } catch { self.error = error.localizedDescription }
         record(.stopped)
     }
-    public func shutdown() { trustUnlock.invalidate(); accessRevision += 1; relay.disconnect(); sessions.forEach { $0.terminate() }; timer?.invalidate() }
+    public func shutdown() { trustUnlock.invalidate(); accessRevision += 1; relay.disconnect(); sessions.forEach { $0.forceClose() }; timer?.invalidate() }
     public func stopRemoteAccess() { pause() }
     public func revokeAllDevices() {
         pause()
@@ -227,9 +328,14 @@ public final class HostController: ObservableObject {
         if !expired.isEmpty { publishSessions() }
     }
     func visibleSessions(for client: String) -> [SessionInfo] {
-        sessions.compactMap { session in
+        let order = Dictionary(uniqueKeysWithValues: groups.enumerated().map { ($0.element.id, $0.offset) })
+        return sessions.sorted {
+            ($0.groupID.flatMap { order[$0] } ?? groups.count) < ($1.groupID.flatMap { order[$0] } ?? groups.count)
+        }.compactMap { session in
             guard access.level(client: client, session: session.id) != .none else { return nil }
             var info = session.info
+            info.group = groups.first(where: { $0.id == session.groupID })
+            info.canRemove = access.canClose(client: client, session: session.id)
             info.canControl = access.level(client: client, session: session.id) == .control
             info.canTerminate = access.canClose(client: client, session: session.id)
             info.controlExpiresAt = access.controlUntil(client: client, session: session.id)
@@ -302,7 +408,7 @@ public final class HostController: ObservableObject {
         }
         guard let session = sessions.first(where: { $0.id == m.sessionID }), access.level(client: client, session: session.id) != .none else { deny(client); return }
         if ["claim", "renew", "input", "resize"].contains(m.type), access.level(client: client, session: session.id) != .control { deny(client, session: session.id); return }
-        if m.type == "terminate", !access.canClose(client: client, session: session.id) { deny(client, session: session.id); return }
+        if ["terminate", "closeAndRemove"].contains(m.type), !access.canClose(client: client, session: session.id) { deny(client, session: session.id); return }
         switch m.type {
         case "viewportNext":
             guard let view = views[client], view.session == session.id, view.id == m.viewportID,
@@ -358,6 +464,7 @@ public final class HostController: ObservableObject {
             guard let columns = m.columns, let rows = m.rows, let epoch = m.epoch, let sequence = m.sequence else { return }
             session.resize(TerminalSize(columns: columns, rows: rows), client: client, epoch: epoch, sequence: sequence)
         case "terminate": session.terminate()
+        case "closeAndRemove": closeAndRemove(id: session.id)
         default: break
         }
     }

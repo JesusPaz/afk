@@ -5,13 +5,42 @@ import AFKHost
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var host: HostController?
+    private var waitingForTermination = false
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard host?.sessions.contains(where: \.running) == true else { return .terminateNow }
+        if waitingForTermination { return .terminateLater }
+        guard let host, host.sessions.contains(where: \.running) else { return .terminateNow }
         let alert = NSAlert(); alert.messageText = L10n.text("¿Detener AFK y sus sesiones?"); alert.informativeText = L10n.text("Se cerrarán los procesos de estas sesiones. Cerrar solo la ventana los mantiene activos.")
         alert.addButton(withTitle: L10n.text("Detener AFK")); alert.addButton(withTitle: L10n.text("Cancelar"))
         guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
-        host?.shutdown(); return .terminateNow
+        waitingForTermination = true
+        host.relay.disconnect()
+        host.sessions.forEach { $0.terminate() }
+        Task { @MainActor in
+            if !(await waitForExit(host, seconds: 2)) {
+                for session in host.sessions where session.running { host.forceClose(id: session.id) }
+            }
+            let stopped = await waitForExit(host, seconds: 3)
+            if stopped { host.shutdown() }
+            waitingForTermination = false
+            sender.reply(toApplicationShouldTerminate: stopped)
+            if !stopped {
+                let failure = NSAlert()
+                failure.messageText = L10n.text("No se pudo confirmar el cierre de todas las terminales")
+                failure.informativeText = L10n.text("AFK seguirá abierto para que puedas revisar las sesiones que aún se están cerrando. El acceso remoto quedó desconectado.")
+                failure.addButton(withTitle: L10n.text("Aceptar"))
+                failure.runModal()
+            }
+        }
+        return .terminateLater
+    }
+    @MainActor private func waitForExit(_ host: HostController, seconds: Int) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(seconds))
+        while host.sessions.contains(where: \.running) {
+            guard ContinuousClock.now < deadline else { return false }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return true
     }
 }
 
@@ -22,7 +51,26 @@ struct AFKMacApp: App {
     var body: some Scene {
         WindowGroup("AFK") { MacWorkspace(host: host).onAppear { delegate.host = host } }
             .defaultSize(width: 1040, height: 720)
-            .commands { CommandGroup(replacing: .newItem) { Button(L10n.text("Nueva sesión")) { _ = host.create(name: L10n.format("Terminal %lld", host.sessions.count + 1)) }.keyboardShortcut("n") } }
+            .commands { SessionWorkspaceCommands() }
+    }
+}
+
+private struct CreateSessionActionKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+private extension FocusedValues {
+    var createSession: (() -> Void)? {
+        get { self[CreateSessionActionKey.self] }
+        set { self[CreateSessionActionKey.self] = newValue }
+    }
+}
+private struct SessionWorkspaceCommands: Commands {
+    @FocusedValue(\.createSession) private var createSession
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button(L10n.text("Nueva sesión")) { createSession?() }.keyboardShortcut("n")
+                .disabled(createSession == nil)
+        }
     }
 }
 
@@ -46,21 +94,92 @@ struct MacWorkspace: View {
     @State private var sheet: WorkspaceSheet?
     @State private var showingHistory = false
     @State private var permissionSession: HostSession?
+    @State private var renaming: HostSession?
+    @State private var editingGroup: SessionGroup?
+    @State private var showingGroupEditor = false
+    @State private var closingSession: HostSession?
+    @State private var forceClosing = false
+    @AppStorage("collapsedSessionGroups") private var collapsedGroupIDs = ""
+    private var collapsedGroups: Set<String> { Set(collapsedGroupIDs.split(separator: ",").map(String.init)) }
+    @State private var showingHidden = false
+    @State private var showingEnded = false
+    @State private var lastHidden: HostSession?
+    @State private var removedGroup: SessionGroup?
+    @State private var removedGroupSessions: [String] = []
+    @State private var emptyTitle: String?
 
-    private func createSession() {
-        selected = host.create(name: L10n.format("Terminal %lld", host.sessions.count + 1))?.id
+    private func createSession(groupID: String? = nil) {
+        guard let session = host.create() else { return }
+        if let groupID { host.moveSession(id: session.id, groupID: groupID) }
+        selected = session.id
     }
-    private func name(for session: HostSession) -> String {
-        guard session.name == "Shell", let index = host.sessions.firstIndex(where: { $0.id == session.id }) else { return session.name }
-        return L10n.format("Terminal %lld", index + 1)
+    private func group(for session: HostSession) -> SessionGroup? {
+        host.groups.first { $0.id == session.groupID }
+    }
+    private func hide(_ session: HostSession) {
+        if selected == session.id { selected = nil; emptyTitle = session.name }
+        host.setHidden(id: session.id, hidden: true)
+        lastHidden = session
+    }
+    private func remove(_ session: HostSession) {
+        if selected == session.id { selected = nil; emptyTitle = session.name }
+        if forceClosing { host.forceClose(id: session.id) }
+        else if session.running { host.closeAndRemove(id: session.id) }
+        else { host.removeEnded(id: session.id) }
+    }
+    private var hidden: [HostSession] { host.sessions.filter(\.isHidden) }
+    private var ended: [HostSession] { host.sessions.filter { !$0.running && !$0.isHidden } }
+    private func visible(groupID: String?) -> [HostSession] {
+        host.sessions.filter { $0.running && !$0.isHidden && $0.groupID == groupID }
     }
     var body: some View {
         NavigationSplitView {
             List(selection: $selected) {
-                Section(L10n.text("Sesiones")) {
-                    ForEach(host.sessions) { session in
-                        MacSessionRow(session: session, title: name(for: session)).tag(session.id)
+                ForEach(host.groups) { group in
+                    DisclosureGroup(isExpanded: Binding(
+                        get: { !collapsedGroups.contains(group.id) },
+                        set: { expanded in
+                            var ids = collapsedGroups
+                            if expanded { ids.remove(group.id) } else { ids.insert(group.id) }
+                            collapsedGroupIDs = ids.sorted().joined(separator: ",")
+                        }
+                    )) {
+                        ForEach(visible(groupID: group.id)) { session in sessionRow(session) }
+                        if visible(groupID: group.id).isEmpty {
+                            Button(L10n.text("Nueva sesión")) { createSession(groupID: group.id) }
+                                .foregroundStyle(.secondary)
+                        }
+                    } label: {
+                        HStack(spacing: 7) {
+                            SessionGroupMark(group: group)
+                            Text(group.name).lineLimit(1)
+                            Spacer(minLength: 2)
+                            Text(visible(groupID: group.id).count.formatted()).foregroundStyle(.secondary).font(.caption.monospacedDigit())
+                        }.contextMenu { groupActions(group) }
                     }
+                }
+                if !visible(groupID: nil).isEmpty {
+                    Section(L10n.text("Sin grupo")) {
+                        ForEach(visible(groupID: nil)) { session in sessionRow(session) }
+                    }
+                }
+                if !hidden.isEmpty {
+                    DisclosureGroup(isExpanded: $showingHidden) {
+                        ForEach(hidden) { session in
+                            HStack {
+                                sessionRow(session)
+                                Button(L10n.text("Mostrar")) {
+                                    host.setHidden(id: session.id, hidden: false)
+                                    selected = session.id
+                                }.buttonStyle(.borderless)
+                            }.selectionDisabled()
+                        }
+                    } label: { Label(L10n.text("Ocultas") + " · " + hidden.count.formatted(), systemImage: "eye.slash") }
+                }
+                if !ended.isEmpty {
+                    DisclosureGroup(isExpanded: $showingEnded) {
+                        ForEach(ended) { session in sessionRow(session) }
+                    } label: { Label(L10n.text("Terminadas") + " · " + ended.count.formatted(), systemImage: "stop.circle") }
                 }
             }
             .listStyle(.sidebar)
@@ -68,59 +187,76 @@ struct MacWorkspace: View {
                 HStack {
                     Text("AFK").font(.title2.weight(.semibold))
                     Spacer()
-                    Button(action: createSession) { Image(systemName: "plus") }
-                        .buttonStyle(.borderless).help(L10n.text("Nueva sesión (⌘N)"))
-                        .accessibilityLabel(L10n.text("Nueva sesión"))
+                    Menu {
+                        Button(L10n.text("Nueva sesión")) { createSession() }
+                        Button(L10n.text("Nuevo grupo…")) { editingGroup = nil; showingGroupEditor = true }
+                    } label: { Image(systemName: "plus") }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .accessibilityLabel(L10n.text("Crear sesión o grupo"))
                 }.padding(.horizontal, 16).padding(.vertical, 12)
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 12) {
+                    if let lastHidden {
+                        HStack {
+                            Text(L10n.text("Sesión oculta")).font(.caption)
+                            Spacer()
+                            Button(L10n.text("Deshacer")) {
+                                host.setHidden(id: lastHidden.id, hidden: false)
+                                self.lastHidden = nil
+                            }
+                        }
+                    }
+                    if let removedGroup {
+                        HStack {
+                            Text(L10n.text("Grupo eliminado")).font(.caption)
+                            Spacer()
+                            Button(L10n.text("Deshacer")) {
+                                host.restoreGroup(removedGroup, sessionIDs: removedGroupSessions)
+                                self.removedGroup = nil
+                            }
+                        }
+                    }
                     Divider()
                     Button { showingHistory = true } label: { Label(L10n.text("Historial guardado"), systemImage: "clock") }
-                    Button(action: createSession) { Label(L10n.text("Nueva sesión"), systemImage: "plus") }
+                    Button { createSession() } label: { Label(L10n.text("Nueva sesión"), systemImage: "plus") }
+                    Button { editingGroup = nil; showingGroupEditor = true } label: { Label(L10n.text("Nuevo grupo…"), systemImage: "folder.badge.plus") }
                     Button { sheet = .devices } label: { Label(L10n.text("Dispositivos"), systemImage: "iphone") }
                     Button { sheet = .server } label: { Label(L10n.text("Conexión"), systemImage: "network") }
-                    RemoteAccessStatus(host: host, relay: host.relay)
-                        .padding(.top, 4)
-                }
-                .buttonStyle(.plain).padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                    RemoteAccessStatus(host: host, relay: host.relay).padding(.top, 4)
+                }.buttonStyle(.plain).padding(16).frame(maxWidth: .infinity, alignment: .leading)
             }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 230, max: 280)
+            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
         } detail: {
-            if !host.sessions.isEmpty {
-                ZStack {
-                    ForEach(host.sessions) { session in
-                        LocalTerminalPane(session: session, active: session.id == selected, managePermissions: {
-                            permissionSession = session
-                            sheet = .permissions
-                        })
+            ZStack {
+                // Keep every live renderer attached, including hidden sessions.
+                ForEach(host.sessions) { session in
+                    LocalTerminalPane(session: session, group: group(for: session), active: session.id == selected && !session.isHidden && !session.closing && sheet == nil && !showingHistory && renaming == nil && !showingGroupEditor && closingSession == nil,
+                                      actions: { AnyView(sessionActions(session)) })
                         .opacity(session.id == selected ? 1 : 0)
                         .allowsHitTesting(session.id == selected)
                         .accessibilityHidden(session.id != selected)
-                    }
                 }
-            } else {
-                ContentUnavailableView {
-                    Label(L10n.text("Tu terminal, contigo."), systemImage: "terminal")
-                } description: {
-                    Text(L10n.text("Abre una sesión en este Mac y continúa desde tu iPhone."))
-                } actions: {
-                    Button(L10n.text("Nueva sesión"), action: createSession).buttonStyle(.borderedProminent)
+                if !host.sessions.contains(where: { $0.id == selected }) {
+                    ContentUnavailableView {
+                        Label(L10n.text("Elige una terminal"), systemImage: "terminal")
+                    } description: {
+                        if let emptyTitle { Text(emptyTitle).fontWeight(.medium) }
+                        Text(L10n.text("Selecciona una sesión en la barra lateral o abre una nueva."))
+                    } actions: {
+                        Button(L10n.text("Nueva sesión")) { createSession() }.buttonStyle(.borderedProminent)
+                    }
                 }
             }
         }
-        .navigationTitle(host.sessions.first(where: { $0.id == selected }).map { name(for: $0) } ?? "AFK")
+        .focusedSceneValue(\.createSession, { createSession() })
+        .navigationTitle(host.sessions.first(where: { $0.id == selected })?.name ?? "AFK")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { sheet = .pair } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: "plus")
-                        Text(L10n.text("Vincular iPhone"))
-                    }.fixedSize()
-                }
-                .buttonStyle(.borderedProminent)
-                .help(L10n.text("Mostrar la invitación segura para vincular un iPhone"))
-                .accessibilityIdentifier("pair-iphone")
+                Button { sheet = .pair } label: { Label(L10n.text("Vincular iPhone"), systemImage: "plus").fixedSize() }
+                    .buttonStyle(.borderedProminent)
+                    .help(L10n.text("Mostrar la invitación segura para vincular un iPhone"))
+                    .accessibilityIdentifier("pair-iphone")
             }
         }
         .sheet(isPresented: $showingHistory) {
@@ -130,32 +266,113 @@ struct MacWorkspace: View {
             MacConnectionSheet(host: host, server: $server, destination: destination,
                                session: destination == .permissions ? permissionSession : nil)
         }
+        .sheet(item: $renaming) { session in
+            SessionNameEditor(session: session) { host.renameSession(id: session.id, label: $0) }
+        }
+        .sheet(isPresented: $showingGroupEditor) {
+            SessionGroupEditor(group: editingGroup) { name, symbol, color in
+                if let group = editingGroup {
+                    host.updateGroup(SessionGroup(id: group.id, name: name, symbol: symbol, color: color))
+                } else { _ = host.createGroup(name: name, symbol: symbol, color: color) }
+            }
+        }
+        .confirmationDialog(forceClosing ? L10n.text("¿Forzar cierre?") : L10n.text("¿Cerrar y quitar esta sesión?"),
+                            isPresented: Binding(get: { closingSession != nil }, set: { if !$0 { closingSession = nil } }),
+                            titleVisibility: .visible) {
+            Button(forceClosing ? L10n.text("Forzar cierre") : L10n.text("Cerrar y quitar"), role: .destructive) {
+                if let closingSession { remove(closingSession) }
+                closingSession = nil
+            }
+            Button(L10n.text("Cancelar"), role: .cancel) { closingSession = nil }
+        } message: {
+            Text([closingSession.flatMap { group(for: $0)?.name }, closingSession?.name].compactMap { $0 }.joined(separator: " / ") + "\n" + L10n.text("Se detendrá la terminal y sus procesos vinculados. La grabación se conservará. Los servicios independientes y las tareas remotas pueden seguir activos."))
+        }
         .alert(L10n.text("No se pudo completar la acción"), isPresented: Binding(
-            get: { host.error != nil && sheet == nil },
-            set: { if !$0 { host.error = nil } }
+            get: { host.error != nil && sheet == nil }, set: { if !$0 { host.error = nil } }
         )) { Button(L10n.text("Aceptar")) { host.error = nil } } message: { Text(host.error ?? "") }
-        .frame(minWidth: 760, minHeight: 480)
+        .frame(minWidth: 860, minHeight: 520)
         .onAppear {
             if host.sessions.isEmpty { createSession() }
-            else if selected == nil { selected = host.sessions.first?.id }
+            else if selected == nil { selected = host.sessions.first(where: { !$0.isHidden && $0.running })?.id }
         }
         .task { await host.restoreConnection(server: server) }
-        .onChange(of: host.sessions.count) { _, _ in selected = host.sessions.last?.id }
+        .onChange(of: host.sessions.map(\.id)) { _, next in
+            if let selected, !next.contains(selected) { self.selected = nil }
+        }
+    }
+
+    private func sessionRow(_ session: HostSession) -> some View {
+        MacSessionRow(session: session, group: group(for: session),
+                      disambiguate: host.sessions.filter { $0.name == session.name }.count > 1)
+            .tag(session.id).contextMenu { sessionActions(session) }
+    }
+    @ViewBuilder private func sessionActions(_ session: HostSession) -> some View {
+        Button(L10n.text("Renombrar…")) { renaming = session }
+        if session.userLabel != nil {
+            Button(L10n.text("Usar título automático")) { host.renameSession(id: session.id, label: nil) }
+        }
+        Menu(L10n.text("Mover a grupo")) {
+            Button(L10n.text("Sin grupo")) { host.moveSession(id: session.id, groupID: nil) }
+            ForEach(host.groups) { group in
+                Button { host.moveSession(id: session.id, groupID: group.id) } label: {
+                    Label(group.name, systemImage: group.symbol)
+                }
+            }
+        }
+        Menu(L10n.text("Ordenar sesión")) {
+            Button(L10n.text("Subir")) { host.reorderSession(id: session.id, offset: -1) }
+            Button(L10n.text("Bajar")) { host.reorderSession(id: session.id, offset: 1) }
+        }
+        if session.isHidden {
+            Button(L10n.text("Mostrar en la barra lateral")) { host.setHidden(id: session.id, hidden: false) }
+        } else {
+            Button(L10n.text("Ocultar en este Mac")) { hide(session) }
+        }
+        Divider()
+        Button(L10n.text("Permisos de la sesión…")) { permissionSession = session; sheet = .permissions }
+            .accessibilityIdentifier("session-permissions")
+        Divider()
+        if session.closing {
+            Button(L10n.text("Forzar cierre…"), role: .destructive) { forceClosing = true; closingSession = session }
+        } else if session.running {
+            Button(L10n.text("Cerrar y quitar…"), role: .destructive) { forceClosing = false; closingSession = session }
+        } else {
+            Button(L10n.text("Quitar de la lista")) { forceClosing = false; remove(session) }
+        }
+    }
+    @ViewBuilder private func groupActions(_ group: SessionGroup) -> some View {
+        Button(L10n.text("Nueva sesión en este grupo")) { createSession(groupID: group.id) }
+        Button(L10n.text("Editar grupo…")) { editingGroup = group; showingGroupEditor = true }
+        Button(L10n.text("Subir")) { host.reorderGroup(id: group.id, offset: -1) }
+        Button(L10n.text("Bajar")) { host.reorderGroup(id: group.id, offset: 1) }
+        Divider()
+        Button(L10n.text("Eliminar grupo y conservar sesiones")) {
+            removedGroup = group
+            removedGroupSessions = host.sessions.filter { $0.groupID == group.id }.map(\.id)
+            host.deleteGroup(id: group.id)
+        }
     }
 }
 
 private struct MacSessionRow: View {
     @ObservedObject var session: HostSession
-    let title: String
+    let group: SessionGroup?
+    let disambiguate: Bool
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "terminal").font(.title3).foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 10) {
+            SessionGroupMark(group: group).padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).fontWeight(.medium)
-                Text(!session.running ? L10n.text("Terminada") : session.lease.owner == "local" ? L10n.text("Escribiendo en este Mac") : session.lease.owner.isEmpty ? L10n.text("Solo lectura") : L10n.text("Control desde iPhone"))
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(session.name).fontWeight(.medium).lineLimit(2)
+                if let context = session.context, !context.isEmpty {
+                    Text(context).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+                HStack(spacing: 5) {
+                    Text(session.closing ? L10n.text("Cerrando…") : !session.running ? L10n.text("Terminada") : session.lease.owner == "local" ? L10n.text("Escribiendo en este Mac") : session.lease.owner.isEmpty ? L10n.text("Solo lectura") : L10n.text("Control desde iPhone"))
+                    if disambiguate { Text(String(session.id.prefix(4))).monospaced() }
+                }.font(.caption2).foregroundStyle(.secondary)
             }
         }.padding(.vertical, 5)
+        .help([session.name, session.context, session.userLabel == nil ? nil : session.reportedTitle].compactMap { $0 }.joined(separator: " · "))
         .accessibilityElement(children: .combine)
     }
 }
@@ -459,19 +676,31 @@ private struct AccessToggle: View {
 
 struct LocalTerminalPane: View {
     @ObservedObject var session: HostSession
+    let group: SessionGroup?
     let active: Bool
-    let managePermissions: () -> Void
-    @State private var confirmEnd = false
+    let actions: () -> AnyView
     private var localControl: Bool { session.lease.owner == "local" }
     var body: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                SessionGroupMark(group: group)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(group?.name ?? L10n.text("Sin grupo")).font(.caption).foregroundStyle(.secondary)
+                    Text(session.name).font(.headline).lineLimit(1)
+                }
+                Spacer()
+                if let context = session.context { Text(context).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
+            }.padding(.horizontal, 16).padding(.vertical, 10)
+            Divider()
             HStack(spacing: 12) {
                 Image(systemName: !session.running ? "stop.circle" : localControl ? "keyboard" : "eye")
                     .foregroundStyle(localControl ? AFKStyle.accent : .secondary)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(!session.running ? L10n.text("Sesión terminada") : localControl ? L10n.text("Estás escribiendo en este Mac") : session.lease.owner.isEmpty ? L10n.text("Estás viendo la sesión") : L10n.text("El iPhone tiene el control"))
+                    Text(session.closing ? L10n.text("Cerrando…") : session.isHidden ? L10n.text("Sesión oculta · vista previa") : !session.running ? L10n.text("Sesión terminada") : localControl ? L10n.text("Estás escribiendo en este Mac") : session.lease.owner.isEmpty ? L10n.text("Estás viendo la sesión") : L10n.text("El iPhone tiene el control"))
                         .font(.callout.weight(.medium))
-                    if session.running && !localControl {
+                    if session.isHidden {
+                        Text(L10n.text("Muéstrala en la barra lateral para volver a escribir.")).font(.caption).foregroundStyle(.secondary)
+                    } else if session.running && !localControl {
                         Text(L10n.text("Puedes seguir la salida o recuperar el teclado aquí.")).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -482,20 +711,13 @@ struct LocalTerminalPane: View {
                     }
                     .keyboardShortcut("l", modifiers: [.command, .shift])
                     .help(L10n.text("Cambiar el control del teclado (⌘⇧L)"))
-                    .disabled(!active)
+                    .disabled(!active || session.closing)
                 }
-                Menu {
-                    Button(action: managePermissions) {
-                        Label(L10n.text("Permisos de la sesión…"), systemImage: "person.badge.key")
-                    }
-                    .accessibilityIdentifier("session-permissions")
-                    Divider()
-                    Button(L10n.text("Terminar sesión…"), role: .destructive) { confirmEnd = true }.disabled(!session.running)
-                } label: { Label(L10n.text("Sesión"), systemImage: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
+                Menu { actions() } label: { Label(L10n.text("Sesión"), systemImage: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
             }.padding(.horizontal, 16).padding(.vertical, 12)
             Divider()
             HistoryRecordingStatus(feed: session.feed)
-            TerminalCanvas(feed: session.feed, editable: session.running && localControl, input: session.localInput, resize: session.localResize, active: active)
+            TerminalCanvas(feed: session.feed, editable: session.running && !session.closing && localControl, input: session.localInput, resize: session.localResize, active: active)
                 .id(session.id)
             HStack {
                 Label(session.running ? L10n.text("En ejecución en este Mac") : L10n.text("Proceso finalizado"), systemImage: "desktopcomputer")
@@ -504,9 +726,6 @@ struct LocalTerminalPane: View {
             }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
         }
 
-        .confirmationDialog(L10n.text("¿Terminar esta sesión?"), isPresented: $confirmEnd) {
-            Button(L10n.text("Terminar sesión"), role: .destructive) { session.terminate() }
-        } message: { Text(L10n.text("Se cerrará la shell para todos los dispositivos. Esta acción no se puede deshacer.")) }
     }
 }
 
@@ -648,5 +867,107 @@ private struct SessionPermissions: View {
             }.disabled(busy)
         }.padding(12).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
         .onAppear { level = current; allowClose = host.access.canClose(client: client, session: session.id) }
+    }
+}
+
+
+struct SessionNameEditor: View {
+    @ObservedObject var session: HostSession
+    let save: (String?) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var label: String
+    @FocusState private var focused: Bool
+
+    init(session: HostSession, save: @escaping (String?) -> Void) {
+        self.session = session
+        self.save = save
+        _label = State(initialValue: session.userLabel ?? session.name)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(L10n.text("Renombrar sesión")).font(.title2.weight(.semibold))
+            Text(L10n.text("Un nombre estable para reconocer esta tarea. Tiene prioridad sobre el título del programa."))
+                .foregroundStyle(.secondary)
+            TextField(L10n.text("Nombre de la sesión"), text: $label)
+                .textFieldStyle(.roundedBorder).focused($focused)
+                .onSubmit { submit() }
+            if let title = session.reportedTitle {
+                Text(L10n.text("Título del programa") + ": " + title).font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Button(L10n.text("Usar título automático")) { save(nil); dismiss() }
+                Spacer()
+                Button(L10n.text("Cancelar")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L10n.text("Guardar")) { submit() }.keyboardShortcut(.defaultAction)
+                    .disabled(label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }.padding(24).frame(width: 480)
+            .onAppear { focused = true }
+    }
+    private func submit() {
+        let value = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        save(value); dismiss()
+    }
+}
+
+struct SessionGroupEditor: View {
+    let group: SessionGroup?
+    let save: (String, String, String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var symbol: String
+    @State private var color: String
+    @FocusState private var focused: Bool
+    private let symbols = [("diamond", "Diamante"), ("square", "Cuadrado"), ("hexagon", "Hexágono"), ("circle", "Círculo"), ("triangle", "Triángulo"), ("folder", "Carpeta")]
+    private let colors = [("blue", "Azul"), ("purple", "Morado"), ("teal", "Verde azulado"), ("orange", "Naranja"), ("pink", "Rosa"), ("gray", "Gris")]
+
+    init(group: SessionGroup?, save: @escaping (String, String, String) -> Void) {
+        self.group = group; self.save = save
+        _name = State(initialValue: group?.name ?? "")
+        _symbol = State(initialValue: group?.symbol ?? "diamond")
+        _color = State(initialValue: group?.color ?? "blue")
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(group == nil ? L10n.text("Nuevo grupo") : L10n.text("Editar grupo")).font(.title2.weight(.semibold))
+            TextField(L10n.text("Nombre del grupo"), text: $name).textFieldStyle(.roundedBorder).focused($focused)
+                .onSubmit { submit() }
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.text("Símbolo")).font(.headline)
+                HStack(spacing: 10) {
+                    ForEach(symbols, id: \.0) { item in
+                        Button { symbol = item.0 } label: {
+                            Image(systemName: item.0).font(.title3).frame(width: 36, height: 32)
+                                .foregroundStyle(AFKStyle.groupColor(color))
+                                .background(symbol == item.0 ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(symbol == item.0 ? Color.primary : .clear))
+                        }.buttonStyle(.plain).accessibilityLabel(L10n.text(item.1))
+                            .accessibilityAddTraits(symbol == item.0 ? .isSelected : [])
+                    }
+                }
+            }
+            Picker(L10n.text("Color"), selection: $color) {
+                ForEach(colors, id: \.0) { item in Text(L10n.text(item.1)).tag(item.0) }
+            }.pickerStyle(.segmented)
+            HStack(spacing: 10) {
+                Image(systemName: symbol).foregroundStyle(AFKStyle.groupColor(color))
+                Text(name.isEmpty ? L10n.text("Nombre del grupo") : name).fontWeight(.medium).lineLimit(1)
+            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+            Text(L10n.text("El nombre y el símbolo identifican el grupo incluso sin distinguir los colores."))
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button(L10n.text("Cancelar")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L10n.text("Guardar")) { submit() }.keyboardShortcut(.defaultAction)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }.padding(24).frame(width: 480).onAppear { focused = true }
+    }
+    private func submit() {
+        let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        save(value, symbol, color); dismiss()
     }
 }

@@ -2,6 +2,63 @@ import XCTest
 import AFKCore
 
 @MainActor final class RemoteAccessModelTests: XCTestCase {
+    func testHiddenSessionsAreLocalToHostAndNeverSelectAnotherSession() throws {
+        let suite = "AFKTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = RemoteModel(preferences: defaults)
+        model.loadHiddenSessions(hostID: "first-host")
+        let first = SessionInfo(id: "first", name: "First", running: true, owner: "", epoch: 0)
+        let second = SessionInfo(id: "second", name: "Second", running: true, owner: "", epoch: 0)
+        var list = Message("sessions"); list.sessions = [first, second]
+        model.relay.onMessage?(list); model.attach(first.id)
+        model.hideSession(first.id)
+        XCTAssertNil(model.selected)
+        XCTAssertFalse(model.ready)
+        XCTAssertEqual(model.visibleSessions.map(\.id), [second.id])
+        XCTAssertEqual(model.hiddenSessions.map(\.id), [first.id])
+        model.attach(first.id)
+        XCTAssertNil(model.selected, "Hidden sessions must not attach through stale navigation")
+        model.loadHiddenSessions(hostID: "second-host")
+        XCTAssertTrue(model.hiddenSessions.isEmpty)
+        model.loadHiddenSessions(hostID: "first-host")
+        XCTAssertEqual(model.hiddenSessions.map(\.id), [first.id])
+        list.sessions = [second]; model.relay.onMessage?(list)
+        XCTAssertTrue(model.hiddenSessions.isEmpty, "Revoked sessions must not leak through hidden counts")
+        list.sessions = [first, second]; model.relay.onMessage?(list)
+        model.showSession(first.id)
+        XCTAssertNil(model.selected, "Unhiding does not redirect input")
+        XCTAssertTrue(model.hiddenSessions.isEmpty)
+    }
+
+    func testLegacyHostDoesNotOfferRemoveOrLeaveSessionClosing() {
+        let model = RemoteModel()
+        var session = SessionInfo(id: "legacy", name: "Legacy", running: true, owner: "", epoch: 0)
+        session.canTerminate = true
+        var list = Message("sessions"); list.sessions = [session]
+        model.relay.onMessage?(list)
+        XCTAssertTrue(model.canCloseSession(session))
+        model.closeSession(session.id)
+        XCTAssertNotEqual(model.sessions.first?.closing, true)
+        session.running = false
+        XCTAssertFalse(model.canCloseSession(session))
+        session.canRemove = true
+        XCTAssertTrue(model.canCloseSession(session))
+    }
+
+    func testClosingSessionCannotReceiveInput() throws {
+        let model = RemoteModel()
+        var session = SessionInfo(id: "closing", name: "Closing", running: true, owner: "", epoch: 0)
+        session.canControl = true; session.canTerminate = true; session.closing = true
+        var list = Message("sessions"); list.sessions = [session]
+        model.relay.onMessage?(list); model.attach(session.id)
+        model.relay.onMessage?(try viewportMessage(model, session: session.id, count: 0))
+        XCTAssertTrue(model.ready)
+        XCTAssertFalse(model.canClaim)
+        XCTAssertFalse(model.canTerminate)
+        XCTAssertFalse(model.canWrite)
+    }
+
     private func viewportMessage(_ model: RemoteModel, session: String, count: UInt64 = 1_000_000) throws -> Message {
         let view = TerminalViewport(size: .initial, rows: Array(repeating: TerminalRow(ansi: "current screen", columns: 80), count: 24),
             cursorX: 0, cursorY: 0, cursorVisible: true, applicationCursor: true, bracketedPaste: true,
@@ -25,7 +82,8 @@ import AFKCore
         frame.data = data.base64EncodedString(); frame.historyOffset = UInt64(data.count); frame.historyLength = UInt64(data.count)
         model.relay.onMessage?(frame)
         XCTAssertFalse(model.canWrite)
-        XCTAssertTrue(model.scrollApplication(3))
+        XCTAssertTrue(model.scrollApplication(0), "Recognize app-owned history without requesting archive pages")
+        XCTAssertFalse(model.scrollApplication(3), "Stop queued movement when input permission is absent")
         XCTAssertFalse(model.loadingHistory)
         XCTAssertTrue(model.ready)
         model.suspend()
@@ -116,8 +174,11 @@ import AFKCore
         var snapshot = Message("snapshot", sessionID: id); snapshot.inputAcknowledgements = true; snapshot.events = [TerminalEvent(data: Data("output".utf8))]
         model.relay.onMessage?(snapshot)
         XCTAssertTrue(model.canClaim); XCTAssertTrue(model.canTerminate)
+        var cancelledScroll = false
+        model.feed.onCancelApplicationScroll = { cancelledScroll = true }
         info.canControl = false; info.canTerminate = false; list.sessions = [info]
         model.relay.onMessage?(list)
+        XCTAssertTrue(cancelledScroll)
         XCTAssertTrue(model.ready); XCTAssertFalse(model.canClaim); XCTAssertFalse(model.canTerminate)
         XCTAssertEqual(model.feed.snapshot?.count, 1)
         model.relay.onDisconnect?()

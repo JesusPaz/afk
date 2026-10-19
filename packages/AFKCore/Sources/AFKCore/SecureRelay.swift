@@ -181,7 +181,7 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
                 } else {
                     guard trust.state.peers.contains(where: { $0.id == offer.clientID && $0.certificate == certificate }),
                           packet.type == "message", var m = packet.message,
-                          ["list", "create", "attach", "viewportNext", "historyPage", "claim", "release", "renew", "input", "resize", "terminate"].contains(m.type) else { throw SecureError.protocolViolation }
+                          ["list", "create", "attach", "viewportNext", "historyPage", "claim", "release", "renew", "input", "resize", "terminate", "closeAndRemove"].contains(m.type) else { throw SecureError.protocolViolation }
                     m.clientID = offer.clientID; self.onMessage?(m)
                 }
             } catch {

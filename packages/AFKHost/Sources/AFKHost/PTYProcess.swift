@@ -14,6 +14,9 @@ final class PTYProcess {
     private var writer: DispatchSourceWrite?
     private var monitor: DispatchSourceProcess?
     private var pending = Data()
+    private var closingGroups: Set<pid_t> = []
+    private var exitStatus: Int32?
+    private var closePoll: Task<Void, Never>?
 
     func start(shell: String, environment: [String]) -> Bool {
         var size = winsize(ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
@@ -34,7 +37,9 @@ final class PTYProcess {
                 self.readAvailable()
                 var status: Int32 = 0
                 _ = waitpid(self.pid, &status, 0)
-                self.pid = -1; self.closeIO(); self.onExit?(status)
+                self.pid = -1; self.exitStatus = status
+                self.monitor?.cancel(); self.monitor = nil
+                self.finishExitIfReady()
             }
         }
         monitor = exitSource; exitSource.activate()
@@ -81,9 +86,36 @@ final class PTYProcess {
             return
         }
     }
-    func terminate() {
-        if pid > 0 { _ = kill(pid, SIGTERM) }
-        closeIO()
+    func terminate(force: Bool = false) {
+        // Interactive jobs have their own foreground process group; signaling just the
+        // shell PID leaves a running tool behind. Never signal AFK's own group.
+        if fd >= 0 {
+            let foreground = tcgetpgrp(fd)
+            if foreground > 0 && foreground != getpgrp() { closingGroups.insert(foreground) }
+        }
+        if pid > 0 {
+            let group = getpgid(pid)
+            if group > 0 && group != getpgrp() { closingGroups.insert(group) }
+        }
+        let signal = force ? SIGKILL : SIGHUP
+        for group in closingGroups { _ = kill(-group, signal) }
+        if pid > 0 { _ = kill(pid, signal) }
+        pending.removeAll(); writer?.cancel(); writer = nil
+        finishExitIfReady()
+    }
+    private func finishExitIfReady() {
+        guard let status = exitStatus else { return }
+        closingGroups = closingGroups.filter { kill(-$0, 0) == 0 || errno == EPERM }
+        guard closingGroups.isEmpty else {
+            guard closePoll == nil else { return }
+            closePoll = Task { [weak self] in
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                self?.closePoll = nil; self?.finishExitIfReady()
+            }
+            return
+        }
+        exitStatus = nil; closePoll?.cancel(); closePoll = nil
+        readAvailable(); closeIO(); onExit?(status)
     }
     private func closeIO() {
         reader?.cancel(); reader = nil; writer?.cancel(); writer = nil

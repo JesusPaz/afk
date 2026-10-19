@@ -4,6 +4,22 @@ import XCTest
 import AFKCore
 
 final class TerminalLayoutTests: XCTestCase {
+    @MainActor func testInactiveTerminalNeverReceivesKeyboardInput() {
+        _ = NSApplication.shared
+        let feed = TerminalFeed()
+        let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 500, height: 400))
+        var input: [Data] = []
+        let coordinator = TerminalCoordinator(feed: feed, editable: true, input: { input.append($0) }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        coordinator.active = false
+        coordinator.send(source: container.terminal, data: Array("wrong session".utf8)[...])
+        XCTAssertTrue(input.isEmpty)
+        coordinator.active = true
+        coordinator.send(source: container.terminal, data: Array("chosen session".utf8)[...])
+        XCTAssertEqual(input, [Data("chosen session".utf8)])
+    }
+
     @MainActor func testPrependingHistoryPreservesVisibleRowWhileOutputContinues() throws {
         _ = NSApplication.shared
         let feed = TerminalFeed()
