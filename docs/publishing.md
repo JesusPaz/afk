@@ -77,11 +77,17 @@ For Apple:
    explicit authorization before reuse; never put them in Git or chat.
 4. Set up an internal TestFlight group in AFK's app record. Upload success means Apple
    accepted the transfer; processing and adding the build to a tester group happen next.
-5. Confirm current Apple agreements and export-compliance answers. AFK now uses
-   end-to-end TLS 1.3 implemented by bundled NIO/BoringSSL as well as Apple
-   cryptography APIs. The plist deliberately omits `ITSAppUsesNonExemptEncryption` so App Store
-   Connect requests the encryption questionnaire for the actual implementation.
-   Do not claim exemption based on the earlier pre-E2EE implementation.
+5. Confirm current Apple agreements. `apps/apple/Info.plist` declares
+   `ITSAppUsesNonExemptEncryption=false`, carrying forward the existing internal
+   builds' export-compliance declaration so new uploads do not require answering
+   the encryption questionnaire each time. This declares exemption from
+   documentation, not absence of encryption: AFK uses end-to-end TLS 1.3 through
+   bundled NIO/BoringSSL as well as Apple cryptography APIs. The current questionnaire
+   answers are standard encryption in addition to Apple's APIs and no distribution
+   in France. Reassess the declaration if encryption or distribution changes.
+   Both EAS and local archives use this plist. Already uploaded builds still need
+   their pending questionnaire completed; this change applies to new builds.
+   See [Apple's export-compliance guidance](https://developer.apple.com/help/app-store-connect/manage-app-information/determine-and-upload-app-encryption-documentation).
 
 The shared retro keyboard icon source is `apps/apple/Artwork/retro-keyboard.png`.
 Run `python3 scripts/release/make-beta-icon.py` on macOS to regenerate all catalog
