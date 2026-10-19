@@ -29,6 +29,34 @@ private final class HistoryPan: UIPanGestureRecognizer {
         XCTAssertEqual(pages, 0)
     }
 
+    func testPageArrivalPreservesVisibleOffsetAfterMomentum() throws {
+        let feed = TerminalFeed()
+        let scrollback = RemoteScrollback(feed: feed)
+        let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let coordinator = TerminalCoordinator(feed: feed, editable: false, input: { _ in }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        scrollback.update(TerminalViewport(size: .initial, rows: (0..<24).map { TerminalRow(ansi: "live \($0)", columns: 80) },
+            cursorX: 0, cursorY: 0, cursorVisible: true, applicationCursor: false, bracketedPaste: false,
+            keyboardFlags: 0, historyCount: 1000, sequence: 1))
+        let request = try XCTUnwrap(scrollback.request(older: true))
+        var page = Message("historyPage"); page.requestID = request.requestID
+        page.historyStart = 936; page.historyBefore = 1000
+        page.historyRows = (936..<1000).map { TerminalRow(ansi: "old \($0)", columns: 80) }
+        XCTAssertTrue(scrollback.accept(page))
+        let view = container.terminal
+        let rowHeight = view.getOptimalFrameSize().height / CGFloat(view.getTerminal().rows)
+        // UIKit can advance the visible offset during momentum without updating yDisp.
+        view.contentOffset.y = rowHeight * 10
+        XCTAssertNotEqual(view.getTerminal().buffer.yDisp, 10)
+        let next = try XCTUnwrap(scrollback.request(older: true))
+        page.requestID = next.requestID; page.historyStart = 872; page.historyBefore = 936
+        page.historyRows = (872..<936).map { TerminalRow(ansi: "old \($0)", columns: 80) }
+        XCTAssertTrue(scrollback.accept(page))
+        XCTAssertEqual(view.getTerminal().buffer.yDisp, 74)
+        XCTAssertEqual(view.contentOffset.y / rowHeight, 74, accuracy: 0.01)
+    }
+
     func testPullingPastFirstRowLoadsOnePageAndKeepsVisibleAnchor() throws {
         let feed = TerminalFeed()
         let scrollback = RemoteScrollback(feed: feed)
