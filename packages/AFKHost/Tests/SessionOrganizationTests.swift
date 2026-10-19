@@ -15,6 +15,12 @@ final class SessionOrganizationTests: XCTestCase {
         session.screen?.append(Data("\u{1b}]0;Other\u{7}\u{1b}]7;file://localhost/Users/test/afk\u{7}".utf8))
         XCTAssertEqual(session.name, "Pinned")
         XCTAssertEqual(session.context, "afk")
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        session.screen?.append(Data("\u{1b}]7;\(home.absoluteString)\u{7}".utf8))
+        XCTAssertEqual(session.context, "~")
+        let project = home.appendingPathComponent("warden")
+        session.screen?.append(Data("\u{1b}]7;\(project.absoluteString)\u{7}".utf8))
+        XCTAssertEqual(session.context, "warden")
         session.rename(nil)
         XCTAssertEqual(session.name, "Other")
         XCTAssertEqual(SessionMetadata.clean("\u{202e}name\n\u{7}"), "name")

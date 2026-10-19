@@ -70,7 +70,8 @@ public final class HostSession: ObservableObject, Identifiable {
         }
         screen?.directoryChanged = { [weak self] directory in
             guard let self, let directory, let url = URL(string: directory), url.isFileURL else { return }
-            let clean = SessionMetadata.clean(url.lastPathComponent)
+            let isHome = url.standardizedFileURL.path == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+            let clean = SessionMetadata.clean(isHome ? "~" : url.lastPathComponent)
             if self.context != clean { self.context = clean; self.metadataChanged() }
         }
         process.onData = { [weak self] in self?.received($0) }
