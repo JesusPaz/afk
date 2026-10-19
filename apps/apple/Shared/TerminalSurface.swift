@@ -159,7 +159,15 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
         observation = feed.observe(replayHistory: restoreHistory) { [weak self, weak container] events, reset in
             guard let self, let container else { return }
             let view = container.terminal
-            let previousTop = self.presentationStart.map { $0 + UInt64(max(0, view.getTerminal().buffer.yDisp)) }
+            #if os(iOS)
+            // UIKit momentum can move the visible viewport without advancing SwiftTerm's yDisp.
+            let rowHeight = view.getOptimalFrameSize().height / CGFloat(view.getTerminal().rows)
+            let lastTop = max(0, Int((view.contentSize.height / rowHeight).rounded()) - view.getTerminal().rows)
+            let visibleTop = min(lastTop, Int((max(0, view.contentOffset.y) + 0.01) / rowHeight))
+            #else
+            let visibleTop = max(0, view.getTerminal().buffer.yDisp)
+            #endif
+            let previousTop = self.presentationStart.map { $0 + UInt64(visibleTop) }
             self.replaying = reset
             if reset {
                 view.getTerminal().resetToInitialState()
@@ -174,7 +182,14 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
             if let start = self.feed.presentationStart {
                 self.presentationStart = start
                 if self.feed.followingPresentation { view.scroll(toPosition: 1) }
-                else if let previousTop { view.scrollTo(row: Int(previousTop > start ? previousTop - start : 0)) }
+                else if let previousTop {
+                    view.scrollTo(row: Int(previousTop > start ? previousTop - start : 0))
+                    #if os(iOS)
+                    // SwiftTerm leaves the offset to UIKit while a drag is active; a new page
+                    // must still shift that offset to keep the same archived row under the finger.
+                    view.contentOffset.y = CGFloat(view.getTerminal().buffer.yDisp) * rowHeight
+                    #endif
+                }
             }
             self.replaying = false
         }
