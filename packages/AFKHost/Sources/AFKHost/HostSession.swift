@@ -8,7 +8,14 @@ import AFKCore
 @MainActor
 public final class HostSession: ObservableObject, Identifiable {
     public let id: String
-    public let name: String
+    @Published public private(set) var userLabel: String?
+    @Published public private(set) var reportedTitle: String?
+    @Published public private(set) var context: String?
+    @Published public internal(set) var groupID: String?
+    @Published public internal(set) var isHidden = false
+    @Published public private(set) var closing = false
+    public var name: String { userLabel ?? reportedTitle ?? context ?? "Terminal · " + id.prefix(4).uppercased() }
+    private var metadataTask: Task<Void, Never>?
     public let feed: TerminalFeed
     @Published public private(set) var running = true
     @Published public private(set) var lease = ControlLease()
@@ -24,10 +31,23 @@ public final class HostSession: ObservableObject, Identifiable {
     private var localSequence: UInt64 = 0
     private var localSize = TerminalSize.initial
     private var lastRenewal = ProcessInfo.processInfo.systemUptime
-    public var info: SessionInfo { SessionInfo(id: id, name: name, running: running, owner: lease.owner, epoch: lease.epoch) }
+    public var info: SessionInfo {
+        var value = SessionInfo(id: id, name: name, running: running, owner: lease.owner, epoch: lease.epoch)
+        value.context = context; value.closing = closing
+        return value
+    }
+    public func rename(_ label: String?) { userLabel = SessionMetadata.clean(label); onState?() }
+    private func metadataChanged() {
+        guard metadataTask == nil else { return }
+        metadataTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            self?.metadataTask = nil; self?.onState?()
+        }
+    }
 
     public init(id: String = UUID().uuidString, name: String = "Shell", history: TerminalHistory? = nil) {
-        self.id = id; self.name = name; feed = TerminalFeed(history: history)
+        self.id = id; feed = TerminalFeed(history: history)
+        if name != "Shell" && !name.hasPrefix("Terminal ") { userLabel = SessionMetadata.clean(name) }
         let directory = history?.entry.directory ?? FileManager.default.temporaryDirectory.appendingPathComponent("AFK-screen-" + UUID().uuidString)
         temporaryScreenDirectory = history == nil ? directory : nil
         screen = try? TerminalScreen(directory: directory)
@@ -43,6 +63,16 @@ public final class HostSession: ObservableObject, Identifiable {
             reply.data = bytes.base64EncodedString(); reply.owner = self.lease.owner; reply.epoch = self.lease.epoch
             self.onEvent?(reply)
         }
+        screen?.titleChanged = { [weak self] title in
+            guard let self else { return }
+            let clean = SessionMetadata.clean(title)
+            if clean != self.reportedTitle { self.reportedTitle = clean; self.metadataChanged() }
+        }
+        screen?.directoryChanged = { [weak self] directory in
+            guard let self, let directory, let url = URL(string: directory), url.isFileURL else { return }
+            let clean = SessionMetadata.clean(url.lastPathComponent)
+            if self.context != clean { self.context = clean; self.metadataChanged() }
+        }
         process.onData = { [weak self] in self?.received($0) }
         process.onExit = { [weak self] in self?.exited($0) }
     }
@@ -56,7 +86,7 @@ public final class HostSession: ObservableObject, Identifiable {
         if !process.start(shell: shell, environment: environment.map { "\($0.key)=\($0.value)" }) { exited(-1) }
     }
     public func claim(_ client: String) {
-        guard running else { return }
+        guard running, !closing else { return }
         lease.claim(client); localSequence = 0; lastRenewal = ProcessInfo.processInfo.systemUptime; publishControl()
         if client == "local" { applySize(localSize) }
     }
@@ -69,7 +99,7 @@ public final class HostSession: ObservableObject, Identifiable {
     }
     @discardableResult
     public func input(_ bytes: Data, client: String, epoch: UInt64, sequence: UInt64) -> Bool {
-        guard running, !bytes.isEmpty, bytes.count <= 8192, lease.accept(client: client, epoch: epoch, sequence: sequence) else { return false }
+        guard running, !closing, !bytes.isEmpty, bytes.count <= 8192, lease.accept(client: client, epoch: epoch, sequence: sequence) else { return false }
         lastRenewal = ProcessInfo.processInfo.systemUptime
         guard process.send(bytes) else { return false }
         if inputEpoch != epoch { acknowledgedInputs.removeAll(); inputEpoch = epoch }
@@ -101,11 +131,12 @@ public final class HostSession: ObservableObject, Identifiable {
         localSequence += 1; input(bytes, client: "local", epoch: lease.epoch, sequence: localSequence)
     }
     public func terminate() {
-        guard running else { return }
+        guard running, !closing else { return }
         flushOutput()
         feed.synchronizeHistory()
-        process.terminate(); running = false; lease.claim(""); publishControl()
+        closing = true; lease.claim(""); publishControl(); process.terminate()
     }
+    public func forceClose() { guard running else { return }; closing = true; lease.claim(""); publishControl(); process.terminate(force: true) }
     private func publishControl() {
         var message = Message("control", sessionID: id); message.owner = lease.owner; message.epoch = lease.epoch; onEvent?(message); onState?()
     }
@@ -128,7 +159,7 @@ public final class HostSession: ObservableObject, Identifiable {
     private func exited(_ status: Int32) {
         flushOutput()
         feed.synchronizeHistory()
-        running = false; lease.claim("")
+        running = false; closing = false; lease.claim("")
         var message = Message("exit", sessionID: id); message.message = "Sesión terminada (\(status))."; onEvent?(message); onState?()
     }
 }

@@ -312,3 +312,129 @@
 
 "Usa la barra para recorrer toda la grabación; desplázate en la terminal para ver las líneas cercanas." = "Use the slider to browse the full recording; scroll the terminal to see nearby lines.";
 "No se pudo leer el historial completo del Mac." = "Could not read the complete history from your Mac.";
+
+"Cerrando…" = "Closing…";
+
+"Cerrar y quitar" = "Close and remove";
+
+"Cerrar y quitar…" = "Close and remove…";
+
+"Color" = "Color";
+
+"Crear sesión o grupo" = "Create session or group";
+
+"Deshacer" = "Undo";
+
+"Editar grupo" = "Edit group";
+
+"Editar grupo…" = "Edit group…";
+
+"El nombre y el símbolo identifican el grupo incluso sin distinguir los colores." = "The name and symbol identify the group even without distinguishing colors.";
+
+"Elige una terminal" = "Choose a terminal";
+
+"Eliminar grupo y conservar sesiones" = "Delete group and keep sessions";
+
+"Forzar cierre" = "Force close";
+
+"Forzar cierre…" = "Force close…";
+
+"Guardar" = "Save";
+
+"Mostrar" = "Show";
+
+"Mostrar en la barra lateral" = "Show in sidebar";
+
+"Mover a grupo" = "Move to group";
+
+"Nombre de la sesión" = "Session name";
+
+"Nombre del grupo" = "Group name";
+
+"Nueva sesión en este grupo" = "New session in this group";
+
+"Nuevo grupo" = "New group";
+
+"Nuevo grupo…" = "New group…";
+
+"Ocultar en este Mac" = "Hide on this Mac";
+
+"Ocultar en este dispositivo" = "Hide on this device";
+
+"Ocultar no detiene la terminal. Los grupos se organizan en el Mac." = "Hiding does not stop the terminal. Organize groups on your Mac.";
+
+"Ocultas" = "Hidden";
+
+"Ocultas (%lld)" = "Hidden (%lld)";
+
+"Ocultaste %@ en este dispositivo" = "You hid %@ on this device";
+
+"Quitar de la lista" = "Remove from list";
+
+"Renombrar sesión" = "Rename session";
+
+"Renombrar…" = "Rename…";
+
+"Se detendrá la terminal y sus procesos vinculados. La grabación se conservará. Los servicios independientes y las tareas remotas pueden seguir activos." = "The terminal and its attached processes will stop. The recording will be kept. Independent services and remote tasks may remain active.";
+
+"Se detendrá la terminal. Su historial guardado se conservará." = "The terminal will stop. Its saved history will be kept.";
+
+"Selecciona una sesión en la barra lateral o abre una nueva." = "Select a session in the sidebar or open a new one.";
+
+"Sesión oculta" = "Session hidden";
+
+"Sin grupo" = "Ungrouped";
+
+"Símbolo" = "Symbol";
+
+"Terminadas" = "Ended";
+
+"Título del programa" = "Program title";
+
+"Un nombre estable para reconocer esta tarea. Tiene prioridad sobre el título del programa." = "A stable name to recognize this task. It takes precedence over the program title.";
+
+"Usar título automático" = "Use automatic title";
+
+"¿Cerrar y quitar esta sesión?" = "Close and remove this session?";
+
+"¿Forzar cierre?" = "Force close?";
+
+"Diamante" = "Diamond";
+
+"Cuadrado" = "Square";
+
+"Hexágono" = "Hexagon";
+
+"Círculo" = "Circle";
+
+"Triángulo" = "Triangle";
+
+"Carpeta" = "Folder";
+
+"Azul" = "Blue";
+
+"Morado" = "Purple";
+
+"Verde azulado" = "Teal";
+
+"Naranja" = "Orange";
+
+"Rosa" = "Pink";
+
+"Gris" = "Gray";
+
+"Sesión oculta · vista previa" = "Hidden session · preview";
+
+"Muéstrala en la barra lateral para volver a escribir." = "Show it in the sidebar to type again.";
+
+"Grupo eliminado" = "Group deleted";
+
+"Ordenar sesión" = "Reorder session";
+
+"Subir" = "Move up";
+
+"Bajar" = "Move down";
+
+"No se pudo confirmar el cierre de todas las terminales" = "Could not confirm that all terminals closed";
+
+"AFK seguirá abierto para que puedas revisar las sesiones que aún se están cerrando. El acceso remoto quedó desconectado." = "AFK will stay open so you can review sessions that are still closing. Remote access was disconnected.";

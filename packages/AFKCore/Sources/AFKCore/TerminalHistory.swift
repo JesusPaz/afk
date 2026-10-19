@@ -7,12 +7,15 @@ public final class TerminalHistory {
         public let name: String
         public let created: Date
         public let directory: URL
+        public var sessionID: String?
+        public var context: String?
+        public var group: SessionGroup?
     }
     public static var defaultDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AFK/Session History", isDirectory: true)
     }
-    public let entry: Entry
+    public private(set) var entry: Entry
     private let writer: FileHandle
     private let encoder = JSONEncoder()
     public init(root: URL, name: String) throws {
@@ -45,6 +48,17 @@ public final class TerminalHistory {
         record.append(data)
         try writer.write(contentsOf: record)
     }
+    public func updateMetadata(name: String, context: String?, group: SessionGroup?, sessionID: String) throws {
+        let name = SessionMetadata.clean(name) ?? entry.name
+        let context = SessionMetadata.clean(context)
+        guard name != entry.name || context != entry.context || group != entry.group || sessionID != entry.sessionID else { return }
+        let updated = Entry(id: entry.id, name: name, created: entry.created, directory: entry.directory,
+                            sessionID: sessionID, context: context, group: group)
+        let path = entry.directory.appendingPathComponent("session.json")
+        try encoder.encode(updated).write(to: path, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
+        entry = updated
+    }
     public func synchronize() throws { try writer.synchronize() }
     public static func entries(root: URL) throws -> [Entry] {
         guard FileManager.default.fileExists(atPath: root.path) else { return [] }
@@ -52,7 +66,8 @@ public final class TerminalHistory {
             .compactMap { directory in
                 guard let data = try? Data(contentsOf: directory.appendingPathComponent("session.json")),
                       let saved = try? JSONDecoder().decode(Entry.self, from: data) else { return nil }
-                return Entry(id: directory.lastPathComponent, name: saved.name, created: saved.created, directory: directory)
+                return Entry(id: directory.lastPathComponent, name: saved.name, created: saved.created, directory: directory,
+                             sessionID: saved.sessionID, context: saved.context, group: saved.group)
             }.sorted { $0.created > $1.created }
     }
     public static func delete(_ entry: Entry) throws { try FileManager.default.removeItem(at: entry.directory) }

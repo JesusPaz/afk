@@ -11,6 +11,16 @@ enum AFKStyle {
     static let terminalBackground = Color(red: 21 / 255, green: 23 / 255, blue: 25 / 255)
     static let terminalForeground = Color(red: 236 / 255, green: 239 / 255, blue: 241 / 255)
     static let terminalFontSize: CGFloat = 14
+    static func groupColor(_ token: String) -> Color {
+        switch token {
+        case "purple": return .purple
+        case "teal": return .teal
+        case "orange": return .orange
+        case "pink": return .pink
+        case "gray": return .secondary
+        default: return .blue
+        }
+    }
     #if os(macOS)
     static var terminalFont: NSFont {
         NSFont(name: "MesloLGSNFM-Regular", size: terminalFontSize)
@@ -72,5 +82,15 @@ struct TerminalCanvas: View {
         TerminalSurface(feed: feed, editable: editable, input: input, resize: resize, active: active)
             .padding(8)
             .background(AFKStyle.terminalBackground)
+    }
+}
+
+struct SessionGroupMark: View {
+    let group: SessionGroup?
+    var body: some View {
+        Image(systemName: group?.symbol ?? "terminal")
+            .foregroundStyle(group.map { AFKStyle.groupColor($0.color) } ?? .secondary)
+            .frame(width: 20)
+            .accessibilityHidden(true)
     }
 }

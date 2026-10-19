@@ -25,9 +25,51 @@ struct AFKiOSApp: App {
 struct PhoneHome: View {
     @ObservedObject var model: RemoteModel
     @State private var showPair = false
-    private func title(_ session: SessionInfo) -> String {
-        guard session.name == "Shell", let index = model.sessions.firstIndex(where: { $0.id == session.id }) else { return session.name }
-        return L10n.format("Terminal %lld", index + 1)
+    @State private var closeTarget: SessionInfo?
+    @State private var collapsedGroupIDs: Set<String> = []
+    private var activeSessions: [SessionInfo] { model.visibleSessions.filter(\.running) }
+    private var groups: [SessionGroup] {
+        var seen: Set<String> = []
+        return activeSessions.compactMap(\.group).filter { seen.insert($0.id).inserted }
+    }
+    private func title(_ session: SessionInfo) -> String { session.name }
+    @ViewBuilder private func sessionRow(_ session: SessionInfo, hidden: Bool = false) -> some View {
+        Group {
+            if hidden {
+                HStack {
+                    sessionLabel(session, showGroup: true)
+                    Spacer()
+                    Button(L10n.text("Mostrar")) { model.showSession(session.id) }.buttonStyle(.bordered)
+                }
+            } else {
+                NavigationLink {
+                    PhoneTerminal(model: model, session: session, title: title(session))
+                } label: { sessionLabel(session, showGroup: !session.running) }
+                .disabled(!model.hostAvailable || session.closing == true)
+            }
+        }
+        .contextMenu {
+            if hidden { Button(L10n.text("Mostrar"), systemImage: "eye") { model.showSession(session.id) } }
+            else { Button(L10n.text("Ocultar en este dispositivo"), systemImage: "eye.slash") { model.hideSession(session.id) } }
+            Button(model.closeActionTitle(session), role: .destructive) {
+                if session.running { closeTarget = session } else { model.closeSession(session.id) }
+            }.disabled(!model.canCloseSession(session))
+        }
+    }
+    private func sessionLabel(_ session: SessionInfo, showGroup: Bool) -> some View {
+        HStack(spacing: 12) {
+            SessionGroupMark(group: session.group)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title(session)).font(.body.weight(.medium)).lineLimit(2)
+                if let context = session.context, !context.isEmpty { Text(context).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                if showGroup, let group = session.group { Text(group.name).font(.caption).foregroundStyle(.secondary) }
+                if model.sessions.filter({ $0.name == session.name && $0.context == session.context }).count > 1 {
+                    Text(String(session.id.prefix(8))).font(.caption.monospaced()).foregroundStyle(.secondary)
+                }
+                Text(L10n.text(session.closing == true ? "Cerrando…" : session.running ? "En ejecución · toca para abrir" : "Sesión terminada"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }.frame(minHeight: 48)
     }
     var body: some View {
         NavigationStack {
@@ -64,36 +106,59 @@ struct PhoneHome: View {
                                 }
                             }.padding(.vertical, 8)
                         }
-                        Section {
-                            if model.sessions.isEmpty {
-                                Text(model.hostAvailable ? L10n.text("Comparte una sesión desde Dispositivos en tu Mac.") : L10n.text("Las sesiones aparecerán cuando tu Mac se conecte."))
-                                    .foregroundStyle(.secondary).padding(.vertical, 8)
+                        if let id = model.lastHiddenSessionID, let hidden = model.hiddenSessions.first(where: { $0.id == id }) {
+                            Section {
+                                Text(L10n.format("Ocultaste %@ en este dispositivo", hidden.name)).font(.subheadline)
+                                Button(L10n.text("Deshacer")) { model.showSession(id) }
                             }
-                            ForEach(model.sessions) { session in
-                                NavigationLink {
-                                    PhoneTerminal(model: model, session: session, title: title(session))
+                        }
+                        if model.sessions.isEmpty || activeSessions.contains(where: { $0.group == nil }) {
+                            Section {
+                                if model.sessions.isEmpty {
+                                    Text(model.hostAvailable ? L10n.text("Comparte una sesión desde Dispositivos en tu Mac.") : L10n.text("Las sesiones aparecerán cuando tu Mac se conecte."))
+                                        .foregroundStyle(.secondary).padding(.vertical, 8)
+                                }
+                                ForEach(activeSessions.filter { $0.group == nil }) { session in sessionRow(session) }
+                            } header: { Text(L10n.text(groups.isEmpty ? "Tus sesiones" : "Sin grupo")) }
+                        }
+                        ForEach(groups) { group in
+                            Section {
+                                DisclosureGroup(isExpanded: Binding(
+                                    get: { !collapsedGroupIDs.contains(group.id) },
+                                    set: { if $0 { collapsedGroupIDs.remove(group.id) } else { collapsedGroupIDs.insert(group.id) } }
+                                )) {
+                                    ForEach(activeSessions.filter { $0.group?.id == group.id }) { session in sessionRow(session) }
                                 } label: {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "terminal").font(.title2).foregroundStyle(.secondary)
-                                        VStack(alignment: .leading, spacing: 5) {
-                                            Text(title(session)).font(.body.weight(.medium))
-                                            Text(session.running ? L10n.text("En ejecución · toca para abrir") : L10n.text("Sesión terminada"))
-                                                .font(.caption).foregroundStyle(.secondary)
-                                        }
-                                    }.frame(minHeight: 48)
-                                }.disabled(!model.hostAvailable)
+                                    HStack {
+                                        Label(group.name, systemImage: group.symbol).foregroundStyle(AFKStyle.groupColor(group.color))
+                                        Spacer()
+                                        Text(String(activeSessions.filter { $0.group?.id == group.id }.count)).foregroundStyle(.secondary)
+                                    }
+                                }
                             }
-                            Button { model.create() } label: {
-                                Label(L10n.text("Nueva sesión"), systemImage: "plus").frame(minHeight: 44)
-                            }.disabled(!model.hostAvailable || !model.canCreate)
-                        } header: { Text(L10n.text("Tus sesiones")) }
-                        footer: { Text(L10n.text("Las sesiones se ejecutan en tu Mac. Salir de AFK en el Mac las detiene.")) }
+                        }
+                        if model.visibleSessions.contains(where: { !$0.running }) {
+                            Section(L10n.text("Terminadas")) {
+                                ForEach(model.visibleSessions.filter { !$0.running }) { session in sessionRow(session) }
+                            }
+                        }
+                        if !model.hiddenSessions.isEmpty {
+                            Section {
+                                DisclosureGroup(L10n.format("Ocultas (%lld)", model.hiddenSessions.count)) {
+                                    ForEach(model.hiddenSessions) { session in sessionRow(session, hidden: true) }
+                                }
+                            } footer: { Text(L10n.text("Ocultar no detiene la terminal. Los grupos se organizan en el Mac.")) }
+                        }
                     }
                 }
             }
             .navigationTitle("AFK")
             .toolbar {
                 if model.linked {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(L10n.text("Nueva sesión"), systemImage: "plus") { model.create() }
+                            .disabled(!model.hostAvailable || !model.canCreate)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button(L10n.text("Reconectar"), systemImage: "arrow.clockwise") { model.reconnect() }
@@ -102,6 +167,13 @@ struct PhoneHome: View {
                         .accessibilityLabel(L10n.text("Opciones de conexión"))
                     }
                 }
+            }
+            .confirmationDialog(L10n.text(closeTarget?.canRemove == true ? "¿Cerrar y quitar esta sesión?" : "¿Terminar esta sesión?"), isPresented: Binding(get: { closeTarget != nil }, set: { if !$0 { closeTarget = nil } }), titleVisibility: .visible) {
+                Button(L10n.text(closeTarget?.canRemove == true ? "Cerrar y quitar" : "Terminar sesión"), role: .destructive) {
+                    if let target = closeTarget { model.closeSession(target.id) }; closeTarget = nil
+                }
+            } message: {
+                Text([closeTarget?.group?.name, closeTarget?.name].compactMap { $0 }.joined(separator: " / ") + "\n" + L10n.text("Se detendrá la terminal. Su historial guardado se conservará."))
             }
             .sheet(isPresented: $showPair) { PairForm(model: model) }
             .alert(L10n.text("No se pudo completar la acción"), isPresented: Binding(
@@ -196,11 +268,24 @@ struct PhoneTerminal: View {
     @ObservedObject var model: RemoteModel
     let session: SessionInfo
     let title: String
+    @Environment(\.dismiss) private var dismiss
     @State private var confirmEnd = false
+    private var currentSession: SessionInfo { model.sessions.first(where: { $0.id == session.id }) ?? session }
+    private var terminalTitle: String {
+        let duplicate = model.sessions.filter { $0.name == currentSession.name && $0.context == currentSession.context }.count > 1
+        return currentSession.name + (duplicate ? " · " + String(session.id.prefix(8)) : "")
+    }
     private var running: Bool { model.sessions.first(where: { $0.id == session.id })?.running ?? false }
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    SessionGroupMark(group: currentSession.group)
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let group = currentSession.group { Text(group.name).font(.caption.weight(.semibold)) }
+                        if let context = currentSession.context { Text(context).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    }
+                }
                 Label(model.terminalStatus, systemImage: model.canWrite ? "keyboard" : "eye")
                     .font(.subheadline.weight(.medium))
                 if let notice = model.sessionNotice { InlineNotice(text: notice) }
@@ -234,16 +319,20 @@ struct PhoneTerminal: View {
                     .font(.caption).foregroundStyle(.secondary).padding(10)
             }
         }
-        .confirmationDialog(L10n.text("¿Terminar esta sesión?"), isPresented: $confirmEnd) {
-            Button(L10n.text("Terminar sesión"), role: .destructive) { model.terminate() }
-        }
-        .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(L10n.text(currentSession.canRemove == true ? "¿Cerrar y quitar esta sesión?" : "¿Terminar esta sesión?"), isPresented: $confirmEnd, titleVisibility: .visible) {
+            Button(L10n.text(currentSession.canRemove == true ? "Cerrar y quitar" : "Terminar sesión"), role: .destructive) { model.closeSession(session.id) }
+        } message: { Text([currentSession.group?.name, currentSession.name].compactMap { $0 }.joined(separator: " / ") + "\n" + L10n.text("Se detendrá la terminal. Su historial guardado se conservará.")) }
+        .navigationTitle(terminalTitle).navigationBarTitleDisplayMode(.inline)
         .onAppear { model.attach(session.id) }.onDisappear { model.leave() }
+        .onChange(of: model.selected) { _, selection in if selection == nil { dismiss() } }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button(L10n.text("Reconectar"), systemImage: "arrow.clockwise") { model.reconnect() }
-                    Button(L10n.text("Terminar sesión"), role: .destructive) { confirmEnd = true }.disabled(!model.canTerminate)
+                    Button(L10n.text("Ocultar en este dispositivo"), systemImage: "eye.slash") { model.hideSession(session.id); dismiss() }
+                    Button(model.closeActionTitle(currentSession), role: .destructive) {
+                        if running { confirmEnd = true } else { model.closeSession(session.id) }
+                    }.disabled(!model.canTerminate)
                 } label: { Label(L10n.text("Opciones de sesión"), systemImage: "ellipsis.circle") }
             }
         }

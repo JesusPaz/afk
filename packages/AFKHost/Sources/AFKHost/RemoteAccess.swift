@@ -82,6 +82,7 @@ public enum SessionAccess: String, CaseIterable { case none, readOnly, control }
         return expired
     }
     func remove(client: String) { trustedClients.remove(client); grants.removeValue(forKey: client); creators.removeValue(forKey: client) }
+    func remove(session: String) { for client in Array(grants.keys) { grants[client]?.removeValue(forKey: session) } }
     func removeAll() { trustedClients.removeAll(); grants.removeAll(); creators.removeAll() }
 }
 

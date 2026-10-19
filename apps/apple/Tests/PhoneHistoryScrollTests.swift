@@ -10,7 +10,7 @@ private final class HistoryPan: UIPanGestureRecognizer {
 }
 
 @MainActor final class PhoneHistoryScrollTests: XCTestCase {
-    func testApplicationScrollUsesGestureDeltasInsteadOfRequestingArchivePages() {
+    func testApplicationScrollUsesGestureDeltasInsteadOfRequestingArchivePages() async throws {
         let feed = TerminalFeed()
         let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
         let coordinator = TerminalCoordinator(feed: feed, editable: true, input: { _ in }, resize: { _ in })
@@ -24,9 +24,55 @@ private final class HistoryPan: UIPanGestureRecognizer {
         for y in [18, 48, 48, 72, 24] {
             pan.motion = CGPoint(x: 0, y: y)
             coordinator.historyPan(pan)
+            try await Task.sleep(for: .milliseconds(40))
         }
-        XCTAssertEqual(lines, [0, 2, 0, 1, -2])
+        XCTAssertEqual(lines.filter { $0 != 0 }, [2, 1, -2])
         XCTAssertEqual(pages, 0)
+    }
+
+    func testLongApplicationGestureKeepsStepsAndFractionalMotion() async throws {
+        let feed = TerminalFeed()
+        let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let coordinator = TerminalCoordinator(feed: feed, editable: true, input: { _ in }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        feed.present([], sequence: 1, start: 0, following: true)
+        var steps: [Int] = []
+        feed.onApplicationScroll = { if $0 != 0 { steps.append($0) }; return true }
+        let pan = HistoryPan(); container.terminal.addGestureRecognizer(pan)
+        pan.motion.y = 250; coordinator.historyPan(pan)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(steps, [8, 2])
+        pan.motion.y = 288; coordinator.historyPan(pan)
+        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertEqual(steps.reduce(0, +), 12, "Fractional movement must survive between callbacks")
+        pan.motion.y = 1200; coordinator.historyPan(pan)
+        feed.onCancelApplicationScroll?()
+        let count = steps.count
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(steps.count, count, "Revoked control must not leave queued wheel events")
+    }
+
+    func testApplicationScrollReversalAndSessionClearCancelQueuedSteps() async throws {
+        let feed = TerminalFeed()
+        let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let coordinator = TerminalCoordinator(feed: feed, editable: true, input: { _ in }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        feed.present([], sequence: 1, start: 0, following: true)
+        var steps: [Int] = []
+        feed.onApplicationScroll = { if $0 != 0 { steps.append($0) }; return true }
+        let pan = HistoryPan(); container.terminal.addGestureRecognizer(pan)
+        pan.motion.y = 480; coordinator.historyPan(pan)
+        pan.motion.y = 432; coordinator.historyPan(pan)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(steps, [8, -2], "Reversing drops obsolete forward motion")
+        pan.motion.y = 1200; coordinator.historyPan(pan)
+        feed.clearPresentation()
+        feed.present([], sequence: 1, start: 0, following: true)
+        let count = steps.count
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(steps.count, count, "A new session must not inherit queued wheel events")
     }
 
     func testPageArrivalPreservesVisibleOffsetAfterMomentum() throws {

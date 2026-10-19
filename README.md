@@ -116,8 +116,10 @@ no separate history menu and opening a session does not download its full record
 In alternate-screen applications such as Codex, history belongs to the application:
 while controlling the session, a vertical drag sends wheel events just like the Mac.
 Take control with **Write from here** to browse that application-owned history.
-Pages for normal shell history contain at most 64 rows / 64 KiB; the phone retains at most 256 historical rows
-plus the current screen. Scrolling forward fetches newer pages and returns to live
+Pages for normal shell history contain at most 64 rows / 64 KiB. The phone prefetches
+one page after showing the current screen and keeps a bounded in-memory cache for
+the current attachment, including when returning to live. It renders at most 256
+historical rows plus the current screen; leaving the session clears the cache. Scrolling forward fetches newer pages and returns to live
 output. New output does not move the row being read. Choosing **Write from here**
 returns to the current screen before enabling input. Both apps need this update.
 
@@ -154,3 +156,19 @@ Update it with `brew upgrade --cask afk@preview`. If you already installed AFK m
 iPhone builds are distributed through the existing internal TestFlight group. Live dictation with delivery confirmation requires the updated app on both devices; see [dictation behavior and validation](docs/dictation.md).
 
 See [publishing and required credentials](docs/publishing.md) for release, signing and tap maintenance, and [local delivery history](docs/local-delivery.md).
+
+### Recognizing and organizing sessions
+
+On Mac, rename a session or use its automatic terminal title, then organize sessions
+into named groups with a symbol and color. A manual name takes precedence over OSC
+0/2 titles; OSC 7 supplies directory context when the shell announces it. iPhone
+shows the same authorized names and groups. Group editing is currently Mac-only.
+
+Hide keeps a session running and can be undone. Hidden state is local to each device.
+Close and remove waits for the shell and foreground process group to exit, then
+removes the row while preserving saved history. Detached processes and external
+services are outside that guarantee. Ended sessions have a separate section and do
+not consume the eight-live-session limit. Hiding or removing the selected session
+never transfers typing to another terminal automatically.
+
+See [the feature plans and validation](docs/plans/session-organization/README.md).

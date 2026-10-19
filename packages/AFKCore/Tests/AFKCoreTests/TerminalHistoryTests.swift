@@ -29,6 +29,33 @@ final class TerminalHistoryTests: XCTestCase {
         try TerminalHistory.delete(entry)
         XCTAssertTrue(try TerminalHistory.entries(root: root).isEmpty)
     }
+    func testOrganizationMetadataSurvivesReopenWithoutChangingRecording() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let history = try TerminalHistory(root: root, name: "Terminal")
+        try history.append(TerminalEvent(data: Data("fixture output".utf8)))
+        try history.synchronize()
+        let group = SessionGroup(name: "Load testing", symbol: "diamond", color: "teal")
+        try history.updateMetadata(name: "Read latency", context: "warden", group: group, sessionID: "fixture-session")
+        let entry = try XCTUnwrap(TerminalHistory.entries(root: root).first)
+        XCTAssertEqual(entry.name, "Read latency"); XCTAssertEqual(entry.context, "warden")
+        XCTAssertEqual(entry.group, group); XCTAssertEqual(entry.sessionID, "fixture-session")
+        let reader = try TerminalHistory.Reader(entry)
+        XCTAssertEqual(try reader.next().first?.data, Data("fixture output".utf8))
+        let attributes = try FileManager.default.attributesOfItem(atPath: entry.directory.appendingPathComponent("session.json").path)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+    func testLegacyMetadataRemainsReadable() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let history = try TerminalHistory(root: root, name: "Old session")
+        let path = history.entry.directory.appendingPathComponent("session.json")
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        json.removeValue(forKey: "group"); json.removeValue(forKey: "context"); json.removeValue(forKey: "sessionID")
+        try JSONSerialization.data(withJSONObject: json).write(to: path)
+        let entry = try XCTUnwrap(TerminalHistory.entries(root: root).first)
+        XCTAssertEqual(entry.name, "Old session"); XCTAssertNil(entry.group); XCTAssertNil(entry.context)
+    }
     func testReaderRejectsCorruptLengthWithoutAllocatingIt() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

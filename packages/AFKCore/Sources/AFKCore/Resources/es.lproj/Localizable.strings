@@ -312,3 +312,129 @@
 
 "Usa la barra para recorrer toda la grabación; desplázate en la terminal para ver las líneas cercanas." = "Usa la barra para recorrer toda la grabación; desplázate en la terminal para ver las líneas cercanas.";
 "No se pudo leer el historial completo del Mac." = "No se pudo leer el historial completo del Mac.";
+
+"Cerrando…" = "Cerrando…";
+
+"Cerrar y quitar" = "Cerrar y quitar";
+
+"Cerrar y quitar…" = "Cerrar y quitar…";
+
+"Color" = "Color";
+
+"Crear sesión o grupo" = "Crear sesión o grupo";
+
+"Deshacer" = "Deshacer";
+
+"Editar grupo" = "Editar grupo";
+
+"Editar grupo…" = "Editar grupo…";
+
+"El nombre y el símbolo identifican el grupo incluso sin distinguir los colores." = "El nombre y el símbolo identifican el grupo incluso sin distinguir los colores.";
+
+"Elige una terminal" = "Elige una terminal";
+
+"Eliminar grupo y conservar sesiones" = "Eliminar grupo y conservar sesiones";
+
+"Forzar cierre" = "Forzar cierre";
+
+"Forzar cierre…" = "Forzar cierre…";
+
+"Guardar" = "Guardar";
+
+"Mostrar" = "Mostrar";
+
+"Mostrar en la barra lateral" = "Mostrar en la barra lateral";
+
+"Mover a grupo" = "Mover a grupo";
+
+"Nombre de la sesión" = "Nombre de la sesión";
+
+"Nombre del grupo" = "Nombre del grupo";
+
+"Nueva sesión en este grupo" = "Nueva sesión en este grupo";
+
+"Nuevo grupo" = "Nuevo grupo";
+
+"Nuevo grupo…" = "Nuevo grupo…";
+
+"Ocultar en este Mac" = "Ocultar en este Mac";
+
+"Ocultar en este dispositivo" = "Ocultar en este dispositivo";
+
+"Ocultar no detiene la terminal. Los grupos se organizan en el Mac." = "Ocultar no detiene la terminal. Los grupos se organizan en el Mac.";
+
+"Ocultas" = "Ocultas";
+
+"Ocultas (%lld)" = "Ocultas (%lld)";
+
+"Ocultaste %@ en este dispositivo" = "Ocultaste %@ en este dispositivo";
+
+"Quitar de la lista" = "Quitar de la lista";
+
+"Renombrar sesión" = "Renombrar sesión";
+
+"Renombrar…" = "Renombrar…";
+
+"Se detendrá la terminal y sus procesos vinculados. La grabación se conservará. Los servicios independientes y las tareas remotas pueden seguir activos." = "Se detendrá la terminal y sus procesos vinculados. La grabación se conservará. Los servicios independientes y las tareas remotas pueden seguir activos.";
+
+"Se detendrá la terminal. Su historial guardado se conservará." = "Se detendrá la terminal. Su historial guardado se conservará.";
+
+"Selecciona una sesión en la barra lateral o abre una nueva." = "Selecciona una sesión en la barra lateral o abre una nueva.";
+
+"Sesión oculta" = "Sesión oculta";
+
+"Sin grupo" = "Sin grupo";
+
+"Símbolo" = "Símbolo";
+
+"Terminadas" = "Terminadas";
+
+"Título del programa" = "Título del programa";
+
+"Un nombre estable para reconocer esta tarea. Tiene prioridad sobre el título del programa." = "Un nombre estable para reconocer esta tarea. Tiene prioridad sobre el título del programa.";
+
+"Usar título automático" = "Usar título automático";
+
+"¿Cerrar y quitar esta sesión?" = "¿Cerrar y quitar esta sesión?";
+
+"¿Forzar cierre?" = "¿Forzar cierre?";
+
+"Diamante" = "Diamante";
+
+"Cuadrado" = "Cuadrado";
+
+"Hexágono" = "Hexágono";
+
+"Círculo" = "Círculo";
+
+"Triángulo" = "Triángulo";
+
+"Carpeta" = "Carpeta";
+
+"Azul" = "Azul";
+
+"Morado" = "Morado";
+
+"Verde azulado" = "Verde azulado";
+
+"Naranja" = "Naranja";
+
+"Rosa" = "Rosa";
+
+"Gris" = "Gris";
+
+"Sesión oculta · vista previa" = "Sesión oculta · vista previa";
+
+"Muéstrala en la barra lateral para volver a escribir." = "Muéstrala en la barra lateral para volver a escribir.";
+
+"Grupo eliminado" = "Grupo eliminado";
+
+"Ordenar sesión" = "Ordenar sesión";
+
+"Subir" = "Subir";
+
+"Bajar" = "Bajar";
+
+"No se pudo confirmar el cierre de todas las terminales" = "No se pudo confirmar el cierre de todas las terminales";
+
+"AFK seguirá abierto para que puedas revisar las sesiones que aún se están cerrando. El acceso remoto quedó desconectado." = "AFK seguirá abierto para que puedas revisar las sesiones que aún se están cerrando. El acceso remoto quedó desconectado.";
