@@ -462,3 +462,15 @@
 "No se pudo establecer la conexión segura. Comprueba la red y el acceso remoto en el Mac." = "Could not establish the secure connection. Check the network and remote access on your Mac.";
 
 "Copiar diagnóstico" = "Copy diagnostics";
+"Trabajo" = "Work";
+"Personal" = "Personal";
+"Perfil" = "Profile";
+"Mover a perfil" = "Move to profile";
+"Nuevo perfil…" = "New profile…";
+"Nombre" = "Name";
+"Crear" = "Create";
+"Arrastra aquí para sacar del grupo" = "Drop here to remove from group";
+"La entrada es demasiado grande. No se envió; pega un bloque más pequeño." = "The input is too large. Nothing was sent; paste a smaller block.";
+"No se pudo enviar toda la entrada. Revisa la terminal antes de continuar." = "Not all input could be sent. Check the terminal before continuing.";
+"Recuperando historial…" = "Restoring history…";
+"El historial no está disponible. La pantalla en vivo sigue conectada." = "History is unavailable. The live screen is still connected.";

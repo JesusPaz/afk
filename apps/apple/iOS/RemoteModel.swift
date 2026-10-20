@@ -292,6 +292,9 @@ final class RemoteModel: ObservableObject {
                 }
                 attachmentTimeout?.cancel(); attachmentTimeout = nil
                 scrollback.update(viewport); viewportBytes = Data()
+                if viewport.historyUnavailable == true {
+                    sessionNotice = L10n.text("El historial no está disponible. La pantalla en vivo sigue conectada.")
+                }
                 inputAcknowledgements = m.inputAcknowledgements == true
                 if owner != (m.owner ?? "") || epoch != m.epoch { cancelInput() }
                 owner = m.owner ?? ""; if epoch != m.epoch { inputSequence = 0 }; epoch = m.epoch ?? 0
@@ -309,6 +312,11 @@ final class RemoteModel: ObservableObject {
                 guard let self, self.viewportID == id else { return }
                 self.relay.send(ack)
             }
+        case "historyError":
+            guard m.sessionID == selected, let id = viewportID, m.viewportID == id,
+                  scrollback.failRequest(m.requestID) else { return }
+            loadingHistory = false
+            sessionNotice = L10n.text("El historial no está disponible. La pantalla en vivo sigue conectada.")
         case "historyPage":
             guard m.sessionID == selected, let id = viewportID, m.viewportID == id else { return }
             let foreground = scrollback.waitingForHistory

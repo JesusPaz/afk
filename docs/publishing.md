@@ -75,8 +75,13 @@ For Apple:
 3. Export/import the distribution credentials above. Team certificates can be shared
    across apps, but the iOS provisioning profile must be AFK's. AFK must have its own provisioning profile. Shared team credentials require
    explicit authorization before reuse; never put them in Git or chat.
-4. Set up an internal TestFlight group in AFK's app record. Upload success means Apple
-   accepted the transfer; processing and adding the build to a tester group happen next.
+4. In App Store Connect → AFK → TestFlight → Internal Testing → **+**, create the
+   internal group with **Enable automatic distribution** selected. Apple then makes eligible
+   uploads available to that group's testers after processing; uploading alone
+   does not mean a build is ready to install. This is a group setting, not an Xcode
+   export option, and does not require a per-release distribution script.
+   See [Apple's internal tester setup](https://developer.apple.com/help/app-store-connect/test-a-beta-version/add-internal-testers).
+   If the group uses manual distribution, add each processed build explicitly.
 5. Confirm current Apple agreements. `apps/apple/Info.plist` declares
    `ITSAppUsesNonExemptEncryption=false`, carrying forward the existing internal
    builds' export-compliance declaration so new uploads do not require answering
@@ -153,7 +158,8 @@ Check the resulting IPA's identifier, version, relay endpoint and icon. Repeat
 key ID/issuer and `-allowProvisioningUpdates`. Keep any temporary API key private
 and remove it when finished. Do not run the ephemeral-runner signing script on
 the login keychain. Apple upload success is separate from processing, encryption
-review and assignment to the internal test group. Only invite testers Jesus names.
+review and assignment to the internal test group. Enable automatic distribution
+on the group to automate that last step. Only invite testers Jesus names.
 
 ## Build numbering and endpoint
 

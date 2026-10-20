@@ -10,7 +10,7 @@ final class TerminalScreen: @preconcurrency TerminalDelegate {
         func send(source: Terminal, data: ArraySlice<UInt8>) {}
     }
     private(set) var terminal: Terminal!
-    let archive: TerminalRowStore
+    let archive: TerminalRowStore?
     private var boundary = 0
     private var promotedRows = 0
     private var cursorVisible = true
@@ -22,8 +22,9 @@ final class TerminalScreen: @preconcurrency TerminalDelegate {
     func setTerminalTitle(source: Terminal, title: String) { titleChanged?(title) }
     func hostCurrentDirectoryUpdated(source: Terminal) { directoryChanged?(source.hostCurrentDirectory) }
 
-    init(directory: URL) throws {
-        archive = try TerminalRowStore(directory: directory)
+    init(directory: URL) {
+        do { archive = try TerminalRowStore(directory: directory) }
+        catch { archive = nil; self.error = error }
         terminal = Terminal(delegate: self, options: TerminalOptions(cols: 80, rows: 24, scrollback: 1000))
     }
     func append(_ data: Data) { terminal.feed(buffer: Array(data)[...]) }
@@ -57,7 +58,7 @@ final class TerminalScreen: @preconcurrency TerminalDelegate {
         copy.resize(cols: size.columns, rows: size.rows)
         do {
             for row in 0..<copy.buffer.yDisp {
-                if let line = copy.getScrollInvariantLine(row: row) { try archive.append(render(line, source: copy)) }
+                if let line = copy.getScrollInvariantLine(row: row) { try archive?.append(render(line, source: copy)) }
             }
         } catch { self.error = error }
     }
@@ -68,7 +69,7 @@ final class TerminalScreen: @preconcurrency TerminalDelegate {
         while boundary < end {
             if promotedRows > 0 { promotedRows -= 1; boundary += 1; continue }
             if let line = source.getScrollInvariantLine(row: boundary), error == nil {
-                do { try archive.append(render(line, source: source)) } catch { self.error = error }
+                do { try archive?.append(render(line, source: source)) } catch { self.error = error }
             }
             boundary += 1
         }
@@ -97,7 +98,8 @@ final class TerminalScreen: @preconcurrency TerminalDelegate {
                 terminal.getLine(row: row).map { render($0, source: terminal, columns: terminal.cols) } ?? TerminalRow(ansi: "", columns: terminal.cols)
             }, cursorX: min(terminal.cols - 1, cursor.x), cursorY: min(terminal.rows - 1, cursor.y), cursorVisible: cursorVisible,
             applicationCursor: terminal.applicationCursor, bracketedPaste: terminal.bracketedPasteMode,
-            keyboardFlags: UInt32(terminal.keyboardEnhancementFlags.rawValue), historyCount: archive.count, sequence: sequence)
+            keyboardFlags: UInt32(terminal.keyboardEnhancementFlags.rawValue), historyCount: error == nil ? archive?.count ?? 0 : 0, sequence: sequence)
+        viewport.historyUnavailable = error != nil
         viewport.scrollUp = scrollEvent(button: 4)
         viewport.scrollDown = scrollEvent(button: 5)
         return viewport

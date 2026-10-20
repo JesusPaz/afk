@@ -2,6 +2,14 @@ import SwiftUI
 import CoreImage.CIFilterBuiltins
 import AFKCore
 import AFKHost
+import UniformTypeIdentifiers
+
+private struct SessionDrag: Codable, Transferable {
+    let id: String
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: UTType(exportedAs: "com.jesuspaz.afk.session", conformingTo: .data))
+    }
+}
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var host: HostController?
@@ -89,6 +97,7 @@ private enum WorkspaceSheet: String, Identifiable {
 
 struct MacWorkspace: View {
     @ObservedObject var host: HostController
+    @AppStorage("workspaceProfile") private var profile: WorkspaceProfile = .personal
     @State private var selected: String?
     @AppStorage("relayURL") private var server = Bundle.main.object(forInfoDictionaryKey: "AFKRelayURL") as? String ?? "http://127.0.0.1:8787"
     @State private var sheet: WorkspaceSheet?
@@ -97,6 +106,9 @@ struct MacWorkspace: View {
     @State private var renaming: HostSession?
     @State private var editingGroup: SessionGroup?
     @State private var showingGroupEditor = false
+    @State private var showingProfileEditor = false
+    @State private var newProfileName = ""
+    @State private var targetedGroup: String?
     @State private var closingSession: HostSession?
     @State private var forceClosing = false
     @AppStorage("collapsedSessionGroups") private var collapsedGroupIDs = ""
@@ -106,10 +118,11 @@ struct MacWorkspace: View {
     @State private var lastHidden: HostSession?
     @State private var removedGroup: SessionGroup?
     @State private var removedGroupSessions: [String] = []
+    @State private var removedGroupProfile: WorkspaceProfile = .personal
     @State private var emptyTitle: String?
 
     private func createSession(groupID: String? = nil) {
-        guard let session = host.create() else { return }
+        guard let session = host.create(profile: profile) else { return }
         if let groupID { host.moveSession(id: session.id, groupID: groupID) }
         selected = session.id
     }
@@ -127,15 +140,18 @@ struct MacWorkspace: View {
         else if session.running { host.closeAndRemove(id: session.id) }
         else { host.removeEnded(id: session.id) }
     }
-    private var hidden: [HostSession] { host.sessions.filter(\.isHidden) }
-    private var ended: [HostSession] { host.sessions.filter { !$0.running && !$0.isHidden } }
+    private func profileName(_ profile: WorkspaceProfile) -> String { host.profileName(profile) }
+    private var profileSessions: [HostSession] { host.sessions.filter { $0.profile == profile } }
+    private var profileGroups: [SessionGroup] { host.groups.filter { host.profile(forGroup: $0.id) == profile } }
+    private var hidden: [HostSession] { profileSessions.filter(\.isHidden) }
+    private var ended: [HostSession] { profileSessions.filter { !$0.running && !$0.isHidden } }
     private func visible(groupID: String?) -> [HostSession] {
-        host.sessions.filter { $0.running && !$0.isHidden && $0.groupID == groupID }
+        profileSessions.filter { $0.running && !$0.isHidden && $0.groupID == groupID }
     }
     var body: some View {
         NavigationSplitView {
             List(selection: $selected) {
-                ForEach(host.groups) { group in
+                ForEach(profileGroups) { group in
                     DisclosureGroup(isExpanded: Binding(
                         get: { !collapsedGroups.contains(group.id) },
                         set: { expanded in
@@ -155,13 +171,34 @@ struct MacWorkspace: View {
                             Text(group.name).lineLimit(1)
                             Spacer(minLength: 2)
                             Text(visible(groupID: group.id).count.formatted()).foregroundStyle(.secondary).font(.caption.monospacedDigit())
-                        }.contextMenu { groupActions(group) }
+                        }
+                        .contentShape(Rectangle())
+                        .background(targetedGroup == group.id ? Color.accentColor.opacity(0.15) : .clear)
+                        .dropDestination(for: SessionDrag.self) { items, _ in
+                            host.dropSessions(items.map(\.id), groupID: group.id, profile: profile)
+                        } isTargeted: { targetedGroup = $0 ? group.id : nil }
+                        .contextMenu { groupActions(group) }
                     }
                 }
-                if !visible(groupID: nil).isEmpty {
-                    Section(L10n.text("Sin grupo")) {
-                        ForEach(visible(groupID: nil)) { session in sessionRow(session) }
+                Section {
+                    ForEach(visible(groupID: nil)) { session in sessionRow(session) }
+                    if visible(groupID: nil).isEmpty {
+                        Text(L10n.text("Arrastra aquí para sacar del grupo"))
+                            .font(.caption).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .dropDestination(for: SessionDrag.self) { items, _ in
+                                host.dropSessions(items.map(\.id), groupID: nil, profile: profile)
+                            } isTargeted: { targetedGroup = $0 ? "ungrouped" : nil }
                     }
+                } header: {
+                    Text(L10n.text("Sin grupo"))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .background(targetedGroup == "ungrouped" ? Color.accentColor.opacity(0.15) : .clear)
+                        .dropDestination(for: SessionDrag.self) { items, _ in
+                            host.dropSessions(items.map(\.id), groupID: nil, profile: profile)
+                        } isTargeted: { targetedGroup = $0 ? "ungrouped" : nil }
                 }
                 if !hidden.isEmpty {
                     DisclosureGroup(isExpanded: $showingHidden) {
@@ -184,15 +221,24 @@ struct MacWorkspace: View {
             }
             .listStyle(.sidebar)
             .safeAreaInset(edge: .top) {
-                HStack {
-                    Text("AFK").font(.title2.weight(.semibold))
-                    Spacer()
-                    Menu {
-                        Button(L10n.text("Nueva sesión")) { createSession() }
-                        Button(L10n.text("Nuevo grupo…")) { editingGroup = nil; showingGroupEditor = true }
-                    } label: { Image(systemName: "plus") }
-                    .menuStyle(.borderlessButton).fixedSize()
-                    .accessibilityLabel(L10n.text("Crear sesión o grupo"))
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("AFK").font(.title2.weight(.semibold))
+                        Spacer()
+                        Menu {
+                            Button(L10n.text("Nueva sesión")) { createSession() }
+                            Button(L10n.text("Nuevo grupo…")) { editingGroup = nil; showingGroupEditor = true }
+                            Button(L10n.text("Nuevo perfil…")) { newProfileName = ""; showingProfileEditor = true }
+                                .disabled(host.profiles.count >= 64)
+                        } label: { Image(systemName: "plus") }
+                        .menuStyle(.borderlessButton).fixedSize()
+                        .accessibilityLabel(L10n.text("Crear sesión o grupo"))
+                    }
+                    Picker(L10n.text("Perfil"), selection: $profile) {
+                        ForEach(host.profiles, id: \.self) { profile in
+                            Text(profileName(profile)).tag(profile)
+                        }
+                    }.pickerStyle(.menu).accessibilityIdentifier("workspace-profile")
                 }.padding(.horizontal, 16).padding(.vertical, 12)
             }
             .safeAreaInset(edge: .bottom) {
@@ -212,7 +258,7 @@ struct MacWorkspace: View {
                             Text(L10n.text("Grupo eliminado")).font(.caption)
                             Spacer()
                             Button(L10n.text("Deshacer")) {
-                                host.restoreGroup(removedGroup, sessionIDs: removedGroupSessions)
+                                host.restoreGroup(removedGroup, sessionIDs: removedGroupSessions, profile: removedGroupProfile)
                                 self.removedGroup = nil
                             }
                         }
@@ -231,13 +277,13 @@ struct MacWorkspace: View {
             ZStack {
                 // Keep every live renderer attached, including hidden sessions.
                 ForEach(host.sessions) { session in
-                    LocalTerminalPane(session: session, group: group(for: session), active: session.id == selected && !session.isHidden && !session.closing && sheet == nil && !showingHistory && renaming == nil && !showingGroupEditor && closingSession == nil,
+                    LocalTerminalPane(session: session, group: group(for: session), active: session.profile == profile && session.id == selected && !session.isHidden && !session.closing && sheet == nil && !showingHistory && renaming == nil && !showingGroupEditor && !showingProfileEditor && closingSession == nil,
                                       actions: { AnyView(sessionActions(session)) })
-                        .opacity(session.id == selected ? 1 : 0)
-                        .allowsHitTesting(session.id == selected)
-                        .accessibilityHidden(session.id != selected)
+                        .opacity(session.profile == profile && session.id == selected ? 1 : 0)
+                        .allowsHitTesting(session.profile == profile && session.id == selected)
+                        .accessibilityHidden(session.profile != profile || session.id != selected)
                 }
-                if !host.sessions.contains(where: { $0.id == selected }) {
+                if !profileSessions.contains(where: { $0.id == selected }) {
                     ContentUnavailableView {
                         Label(L10n.text("Elige una terminal"), systemImage: "terminal")
                     } description: {
@@ -269,11 +315,19 @@ struct MacWorkspace: View {
         .sheet(item: $renaming) { session in
             SessionNameEditor(session: session) { host.renameSession(id: session.id, label: $0) }
         }
+        .alert(L10n.text("Nuevo perfil…"), isPresented: $showingProfileEditor) {
+            TextField(L10n.text("Nombre"), text: $newProfileName)
+            Button(L10n.text("Crear")) {
+                if let created = host.createProfile(name: newProfileName) { profile = created }
+            }.disabled(SessionMetadata.clean(newProfileName) == nil ||
+                host.profiles.contains { profileName($0).localizedCaseInsensitiveCompare(SessionMetadata.clean(newProfileName) ?? "") == .orderedSame })
+            Button(L10n.text("Cancelar"), role: .cancel) {}
+        }
         .sheet(isPresented: $showingGroupEditor) {
             SessionGroupEditor(group: editingGroup) { name, symbol, color, emoji in
                 if let group = editingGroup {
                     host.updateGroup(SessionGroup(id: group.id, name: name, symbol: symbol, color: color, emoji: emoji))
-                } else { _ = host.createGroup(name: name, symbol: symbol, color: color, emoji: emoji) }
+                } else { _ = host.createGroup(name: name, symbol: symbol, color: color, emoji: emoji, profile: profile) }
             }
         }
         .confirmationDialog(forceClosing ? L10n.text("¿Forzar cierre?") : L10n.text("¿Cerrar y quitar esta sesión?"),
@@ -292,12 +346,16 @@ struct MacWorkspace: View {
         )) { Button(L10n.text("Aceptar")) { host.error = nil } } message: { Text(host.error ?? "") }
         .frame(minWidth: 860, minHeight: 520)
         .onAppear {
+            if !host.profiles.contains(profile) { profile = .personal }
             if host.sessions.isEmpty { createSession() }
-            else if selected == nil { selected = host.sessions.first(where: { !$0.isHidden && $0.running })?.id }
+            else if selected == nil { selected = profileSessions.first(where: { !$0.isHidden && $0.running })?.id }
         }
         .task { await host.restoreConnection(server: server) }
         .onChange(of: host.sessions.map(\.id)) { _, next in
             if let selected, !next.contains(selected) { self.selected = nil }
+        }
+        .onChange(of: profile) { _, _ in
+            selected = nil; emptyTitle = nil; lastHidden = nil; removedGroup = nil
         }
     }
 
@@ -305,6 +363,10 @@ struct MacWorkspace: View {
         MacSessionRow(session: session, group: group(for: session),
                       disambiguate: host.sessions.filter { $0.name == session.name }.count > 1)
             .tag(session.id).contextMenu { sessionActions(session) }
+            .draggable(SessionDrag(id: session.id))
+            .dropDestination(for: SessionDrag.self) { items, _ in
+                host.dropSessions(items.map(\.id), groupID: session.groupID, profile: profile)
+            }
     }
     @ViewBuilder private func sessionActions(_ session: HostSession) -> some View {
         Button(L10n.text("Renombrar…")) { renaming = session }
@@ -313,9 +375,17 @@ struct MacWorkspace: View {
         }
         Menu(L10n.text("Mover a grupo")) {
             Button(L10n.text("Sin grupo")) { host.moveSession(id: session.id, groupID: nil) }
-            ForEach(host.groups) { group in
+            ForEach(profileGroups) { group in
                 Button { host.moveSession(id: session.id, groupID: group.id) } label: {
                     Label { Text(group.name) } icon: { SessionGroupMark(group: group) }
+                }
+            }
+        }
+        Menu(L10n.text("Mover a perfil")) {
+            ForEach(host.profiles.filter { $0 != session.profile }, id: \.self) { destination in
+                Button(profileName(destination)) {
+                    if selected == session.id { selected = nil }
+                    host.moveSession(id: session.id, profile: destination)
                 }
             }
         }
@@ -343,11 +413,20 @@ struct MacWorkspace: View {
     @ViewBuilder private func groupActions(_ group: SessionGroup) -> some View {
         Button(L10n.text("Nueva sesión en este grupo")) { createSession(groupID: group.id) }
         Button(L10n.text("Editar grupo…")) { editingGroup = group; showingGroupEditor = true }
+        Menu(L10n.text("Mover a perfil")) {
+            ForEach(host.profiles.filter { $0 != host.profile(forGroup: group.id) }, id: \.self) { destination in
+                Button(profileName(destination)) {
+                    if host.sessions.contains(where: { $0.id == selected && $0.groupID == group.id }) { selected = nil }
+                    host.moveGroup(id: group.id, profile: destination)
+                }
+            }
+        }
         Button(L10n.text("Subir")) { host.reorderGroup(id: group.id, offset: -1) }
         Button(L10n.text("Bajar")) { host.reorderGroup(id: group.id, offset: 1) }
         Divider()
         Button(L10n.text("Eliminar grupo y conservar sesiones")) {
             removedGroup = group
+            removedGroupProfile = host.profile(forGroup: group.id)
             removedGroupSessions = host.sessions.filter { $0.groupID == group.id }.map(\.id)
             host.deleteGroup(id: group.id)
         }
@@ -717,6 +796,7 @@ struct LocalTerminalPane: View {
             }.padding(.horizontal, 16).padding(.vertical, 12)
             Divider()
             HistoryRecordingStatus(feed: session.feed)
+            if let error = session.inputError { InlineNotice(text: error) }
             TerminalCanvas(feed: session.feed, editable: session.running && !session.closing && localControl, input: session.localInput, resize: session.localResize, active: active)
                 .id(session.id)
             HStack {

@@ -34,6 +34,11 @@ public final class RemoteScrollback {
         pending = nil; browsing = false; rows = []; start = viewport.historyCount; end = start
         display(following: true)
     }
+    @discardableResult public func failRequest(_ id: String?) -> Bool {
+        guard let id, pending?.id == id else { return false }
+        returnToLive()
+        return true
+    }
     public func request(older: Bool) -> Message? {
         guard let viewport else { return nil }
         if !older && end >= viewport.historyCount {

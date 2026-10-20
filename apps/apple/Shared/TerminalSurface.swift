@@ -122,6 +122,14 @@ final class TerminalContainer: PlatformView {
         scroll.contentSize = frame.size
         #endif
     }
+    #if os(iOS)
+    var followingLatest = false
+    func revealLatestRows() {
+        // An observer can receive a Mac grid taller than the phone. SwiftTerm's
+        // own scroll position does not move this outer viewport.
+        scroll.contentOffset.y = max(0, scroll.contentSize.height - scroll.bounds.height)
+    }
+    #endif
     #if os(macOS)
     private func arrangePanel() {
         let size = terminal.frame.size
@@ -147,6 +155,8 @@ final class TerminalContainer: PlatformView {
         scroll.frame = bounds
         #if os(macOS)
         arrangePanel()
+        #else
+        if followingLatest { revealLatestRows() }
         #endif
         guard cell.width > 0, cell.height > 0, bounds.width > extraWidth, bounds.height > 0 else { return }
         let columns = min(400, max(2, Int((bounds.width - extraWidth) / cell.width)))
@@ -211,7 +221,7 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
         if let fileTerminal = view as? FileDropTerminalView {
             fileTerminal.acceptsFileInput = { [weak self] in
                 guard let self else { return false }
-                return self.active && self.editable && !self.replaying && !self.attaching
+                return self.active && self.editable && !self.replaying && !self.attaching && !self.feed.isRestoringHistory
             }
             fileTerminal.fileInput = { [weak self, weak view] text in
                 guard let self, let view else { return }
@@ -239,6 +249,7 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
             let view = container.terminal
             if self.feed.presentationStart == nil { self.cancelApplicationScroll() }
             #if os(iOS)
+            container.followingLatest = self.feed.presentationStart != nil && self.feed.followingPresentation
             // UIKit momentum can move the visible viewport without advancing SwiftTerm's yDisp.
             let rowHeight = view.getOptimalFrameSize().height / CGFloat(view.getTerminal().rows)
             let lastTop = max(0, Int((view.contentSize.height / rowHeight).rounded()) - view.getTerminal().rows)
@@ -250,7 +261,9 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
             self.replaying = reset
             if reset {
                 view.getTerminal().resetToInitialState()
+                #if os(macOS)
                 view.resize(cols: 80, rows: 24); container.fitRenderer()
+                #endif
             }
             for event in events {
                 if let size = event.size {
@@ -260,7 +273,12 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
             }
             if let start = self.feed.presentationStart {
                 self.presentationStart = start
-                if self.feed.followingPresentation { view.scroll(toPosition: 1) }
+                if self.feed.followingPresentation {
+                    view.scroll(toPosition: 1)
+                    #if os(iOS)
+                    container.revealLatestRows()
+                    #endif
+                }
                 else if let previousTop {
                     view.scrollTo(row: Int(previousTop > start ? previousTop - start : 0))
                     #if os(iOS)
@@ -274,7 +292,7 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
         }
     }
     func detach() { active = false; cancelApplicationScroll(); feed.onCancelApplicationScroll = nil; pending?.cancel(); if let observation { feed.remove(observation) } }
-    func send(source: TerminalView, data: ArraySlice<UInt8>) { if active && editable && !replaying && !attaching { input(Data(data)) } }
+    func send(source: TerminalView, data: ArraySlice<UInt8>) { if active && editable && !replaying && !attaching && !feed.isRestoringHistory { input(Data(data)) } }
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
     func setTerminalTitle(source: TerminalView, title: String) {}
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}

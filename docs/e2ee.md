@@ -258,3 +258,12 @@ authority for all actions. Reported titles are untrusted bounded plain text.
 only after confirmed process exit. Legacy `terminate` retains its ended-row behavior;
 updated phones use it when the host lacks `canRemove`. Organization editing remains
 local to Mac. Hide is a local presentation preference and never revokes remote access.
+
+### History failure isolation
+
+A viewport can include optional `historyUnavailable: true`; its live rows remain
+usable while archived pages are unavailable. A failed page request returns
+`historyError` with the original `sessionID`, `viewportID` and `requestID`. The
+phone accepts only its pending request, returns to the live screen and shows a
+notice without clearing the attachment. Denied operations preserve an existing
+viewport while the caller still has read access. Update both apps for this behavior.

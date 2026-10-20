@@ -4,6 +4,96 @@ import AFKCore
 @testable import AFKHost
 
 final class SessionOrganizationTests: XCTestCase {
+    @MainActor func testCustomProfilesPersistAndDropsOnlyMoveKnownSessionsWithinProfile() throws {
+        let suite = "afk-drag-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let host = HostController(preferences: preferences)
+        defer { host.shutdown() }
+        let profile = try XCTUnwrap(host.createProfile(name: " Clientes "))
+        XCTAssertNil(host.createProfile(name: "clientes"))
+        XCTAssertNil(host.createProfile(name: " \n"))
+        let first = try XCTUnwrap(host.createGroup(name: "One", profile: profile))
+        let second = try XCTUnwrap(host.createGroup(name: "Two", profile: profile))
+        let session = try XCTUnwrap(host.create(profile: profile))
+        session.claim("phone")
+        let epoch = session.lease.epoch
+        XCTAssertTrue(host.dropSessions([session.id], groupID: first.id, profile: profile))
+        XCTAssertTrue(host.dropSessions([session.id], groupID: second.id, profile: profile))
+        XCTAssertEqual(session.groupID, second.id)
+        XCTAssertFalse(host.dropSessions([session.id, "missing"], groupID: nil, profile: profile))
+        XCTAssertEqual(session.groupID, second.id, "Invalid multi-item drops are atomic")
+        XCTAssertFalse(host.dropSessions([session.id], groupID: nil, profile: .personal))
+        XCTAssertTrue(host.dropSessions([session.id], groupID: nil, profile: profile))
+        XCTAssertNil(session.groupID)
+        XCTAssertEqual(session.profile, profile)
+        XCTAssertTrue(session.running)
+        XCTAssertEqual(session.lease.owner, "phone")
+        XCTAssertEqual(session.lease.epoch, epoch)
+        let restored = HostController(preferences: preferences)
+        defer { restored.shutdown() }
+        XCTAssertTrue(restored.profiles.contains(profile))
+        XCTAssertEqual(restored.profileName(profile), "Clientes")
+        XCTAssertEqual(restored.profile(forGroup: first.id), profile)
+        XCTAssertEqual(try JSONDecoder().decode(WorkspaceProfile.self, from: Data("\"work\"".utf8)), .work)
+    }
+
+    @MainActor func testProfilesMoveGroupsAndSessionsWithoutChangingControl() throws {
+        let suite = "afk-profiles-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let host = HostController(preferences: preferences)
+        defer { host.shutdown() }
+        let group = try XCTUnwrap(host.createGroup(name: "AFK"))
+        let session = try XCTUnwrap(host.create())
+        host.moveSession(id: session.id, groupID: group.id)
+        session.claim("phone")
+        let epoch = session.lease.epoch
+        host.moveGroup(id: group.id, profile: .work)
+        XCTAssertEqual(host.profile(forGroup: group.id), .work)
+        XCTAssertEqual(session.profile, .work)
+        XCTAssertEqual(session.groupID, group.id)
+        XCTAssertTrue(session.running)
+        XCTAssertEqual(session.lease.owner, "phone")
+        XCTAssertEqual(session.lease.epoch, epoch)
+        host.moveSession(id: session.id, profile: .personal)
+        XCTAssertNil(session.groupID, "Moving one session must not move its former group")
+        XCTAssertEqual(host.profile(forGroup: group.id), .work)
+        host.moveSession(id: session.id, groupID: group.id)
+        XCTAssertEqual(session.profile, .work)
+        host.deleteGroup(id: group.id)
+        XCTAssertEqual(session.profile, .work)
+        host.restoreGroup(group, sessionIDs: [session.id], profile: .work)
+        XCTAssertEqual(session.groupID, group.id)
+        let restored = HostController(preferences: preferences)
+        defer { restored.shutdown() }
+        XCTAssertEqual(restored.profile(forGroup: group.id), .work)
+        XCTAssertTrue(restored.sessions.isEmpty, "Profiles must not restart shells")
+    }
+
+    @MainActor func testLegacyOrganizationDefaultsToPersonalAndOrderingStaysInsideProfile() throws {
+        let suite = "afk-profile-migration-" + UUID().uuidString
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let old = SessionGroup(name: "Existing")
+        let groups = try JSONSerialization.jsonObject(with: JSONEncoder().encode([old]))
+        preferences.set(try JSONSerialization.data(withJSONObject: [
+            "version": 1, "groups": groups, "sessions": [:]
+        ]), forKey: "sessionOrganization")
+        let host = HostController(preferences: preferences)
+        defer { host.shutdown() }
+        XCTAssertEqual(host.groups, [old])
+        XCTAssertEqual(host.profile(forGroup: old.id), .personal)
+        let work = try XCTUnwrap(host.createGroup(name: "Work", profile: .work))
+        let personal = try XCTUnwrap(host.createGroup(name: "Personal"))
+        host.reorderGroup(id: personal.id, offset: -1)
+        XCTAssertEqual(host.groups.map(\.id), [personal.id, work.id, old.id])
+        host.reorderGroup(id: work.id, offset: -1)
+        XCTAssertEqual(host.groups.map(\.id), [personal.id, work.id, old.id])
+        let session = try XCTUnwrap(host.create(profile: .work))
+        XCTAssertEqual(session.profile, .work)
+    }
+
     @MainActor func testFragmentedTitlesAliasAndDirectory() throws {
         let session = HostSession(id: "ABCD-1234")
         XCTAssertEqual(session.name, "Terminal · ABCD")

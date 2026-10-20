@@ -115,7 +115,7 @@ final class TerminalLayoutTests: XCTestCase {
         XCTAssertEqual(container.terminal.getTerminal().getLine(row: 0)?.translateToString(), before)
     }
 
-    @MainActor func testReattachAfterReplayOverflowRestoresAlternateScreenWithoutSendingInput() throws {
+    @MainActor func testReattachAfterReplayOverflowRestoresAlternateScreenWithoutSendingInput() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -139,6 +139,8 @@ final class TerminalLayoutTests: XCTestCase {
         let replacement = TerminalCoordinator(feed: feed, editable: true, input: { inputs.append($0) }, resize: { _ in })
         replacement.attach(restored)
         defer { replacement.detach() }
+        for _ in 0..<500 where feed.isRestoringHistory { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(feed.isRestoringHistory)
         let actual = restored.terminal.getTerminal()
         XCTAssertEqual(actual.cols, 110); XCTAssertEqual(actual.rows, 36)
         XCTAssertEqual((0..<36).map { actual.getLine(row: $0)?.translateToString() }, before)

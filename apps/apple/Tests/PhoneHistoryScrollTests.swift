@@ -10,6 +10,43 @@ private final class HistoryPan: UIPanGestureRecognizer {
 }
 
 @MainActor final class PhoneHistoryScrollTests: XCTestCase {
+    func testTallLiveScreenStaysAtBottomWhenNewOutputArrives() throws {
+        let feed = TerminalFeed()
+        let scrollback = RemoteScrollback(feed: feed)
+        let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 300))
+        container.layoutIfNeeded()
+        let coordinator = TerminalCoordinator(feed: feed, editable: false, input: { _ in }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        let scroll = try XCTUnwrap(container.terminal.superview as? UIScrollView)
+        for sequence in 1...3 {
+            scrollback.update(TerminalViewport(size: TerminalSize(columns: 80, rows: 60),
+                rows: (0..<60).map { TerminalRow(ansi: "output \(sequence) row \($0)", columns: 80) },
+                cursorX: 0, cursorY: 59, cursorVisible: true, applicationCursor: false,
+                bracketedPaste: false, keyboardFlags: 0, historyCount: UInt64(1000 + sequence),
+                sequence: UInt64(sequence)))
+            XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
+            XCTAssertEqual(scroll.contentOffset.y, scroll.contentSize.height - scroll.bounds.height,
+                           accuracy: 0.1, "Opening and updating a tall screen must show its latest rows")
+        }
+        container.frame.size.height = 220
+        container.setNeedsLayout(); container.layoutIfNeeded()
+        XCTAssertEqual(scroll.contentOffset.y, scroll.contentSize.height - scroll.bounds.height,
+                       accuracy: 0.1, "Keyboard and layout changes must keep the latest rows visible")
+        let request = try XCTUnwrap(scrollback.request(older: true))
+        var page = Message("historyPage"); page.requestID = request.requestID
+        page.historyStart = 939; page.historyBefore = 1003
+        page.historyRows = (939..<1003).map { TerminalRow(ansi: "old \($0)", columns: 80) }
+        XCTAssertTrue(scrollback.accept(page))
+        scroll.contentOffset.y = 500
+        let next = try XCTUnwrap(scrollback.request(older: true))
+        page.requestID = next.requestID; page.historyStart = 875; page.historyBefore = 939
+        page.historyRows = (875..<939).map { TerminalRow(ansi: "old \($0)", columns: 80) }
+        XCTAssertTrue(scrollback.accept(page))
+        XCTAssertEqual(scroll.contentOffset.y, 500, accuracy: 0.1,
+                       "Loading older history must not shrink the outer viewport and jump upward")
+    }
+
     func testApplicationScrollUsesGestureDeltasInsteadOfRequestingArchivePages() async throws {
         let feed = TerminalFeed()
         let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))

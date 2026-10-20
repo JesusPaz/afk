@@ -9,10 +9,24 @@ private final class SilentTerminalDelegate: TerminalDelegate {
 }
 
 @MainActor final class TerminalScreenTests: XCTestCase {
+    func testLiveScreenSurvivesUnavailableArchive() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data().write(to: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let screen = TerminalScreen(directory: root)
+        XCTAssertNotNil(screen.error)
+        screen.append(Data("live before\r\n".utf8))
+        screen.resize(TerminalSize(columns: 43, rows: 13))
+        screen.append(Data("live after".utf8))
+        let view = screen.snapshot(sequence: 2)
+        XCTAssertEqual(view.historyUnavailable, true)
+        XCTAssertEqual(view.historyCount, 0)
+        XCTAssertTrue(view.rows.contains { $0.ansi.contains("live after") })
+    }
     func testViewportRowsMatchWidthAfterMacAndPhoneResizes() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let screen = try TerminalScreen(directory: root)
+        let screen = TerminalScreen(directory: root)
         screen.append(Data("\u{1b}[?1049h".utf8))
         for size in [TerminalSize(columns: 280, rows: 80), TerminalSize(columns: 43, rows: 13), TerminalSize(columns: 137, rows: 43)] {
             screen.resize(size)
@@ -28,7 +42,7 @@ private final class SilentTerminalDelegate: TerminalDelegate {
     func testCodexAlternateScreenScrollSurvivesPhoneResizeWithoutSendingInput() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let screen = try TerminalScreen(directory: root)
+        let screen = TerminalScreen(directory: root)
         var responses: [Data] = []
         screen.response = { responses.append($0) }
         screen.resize(TerminalSize(columns: 137, rows: 43))
@@ -55,7 +69,7 @@ private final class SilentTerminalDelegate: TerminalDelegate {
     func testCurrentScreenDoesNotDependOnTransferringOldOutput() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let screen = try TerminalScreen(directory: root)
+        let screen = TerminalScreen(directory: root)
         for i in 0..<20_000 { screen.append(Data("row \(i) café 🌱\r\n".utf8)) }
         screen.append(Data("\u{1b}[?1049h\u{1b}[2J\u{1b}[3;5H\u{1b}[31mCodex café 🌱\u{1b}[0m".utf8))
         let viewport = screen.snapshot(sequence: 123)
@@ -63,10 +77,10 @@ private final class SilentTerminalDelegate: TerminalDelegate {
         XCTAssertEqual(viewport.rows.count, 24)
         XCTAssertLessThan(try JSONEncoder().encode(viewport).count, 12 * 1024)
         XCTAssertTrue(viewport.rows[2].ansi.contains("Codex café 🌱"))
-        let first = try screen.archive.page(before: 64)
+        let first = try XCTUnwrap(screen.archive).page(before: 64)
         XCTAssertEqual(first.start, 0)
         XCTAssertTrue(first.rows[0].ansi.contains("row 0 café 🌱"))
-        let previous = try screen.archive.page(before: viewport.historyCount)
+        let previous = try XCTUnwrap(screen.archive).page(before: viewport.historyCount)
         XCTAssertEqual(previous.start + UInt64(previous.rows.count), viewport.historyCount)
         XCTAssertNil(screen.error)
     }
@@ -74,15 +88,15 @@ private final class SilentTerminalDelegate: TerminalDelegate {
     func testNarrowingArchivesVisibleTextWithoutReplayingOldHistory() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let screen = try TerminalScreen(directory: root)
+        let screen = TerminalScreen(directory: root)
         for i in 0..<1000 { screen.append(Data("old \(i)\r\n".utf8)) }
         screen.append(Data("\u{1b}[2J\u{1b}[H".utf8))
         for i in 0..<20 { screen.append(Data(("unique-\(i)-" + String(repeating: "x", count: 55) + "\r\n").utf8)) }
-        let before = screen.archive.count
+        let before = try XCTUnwrap(screen.archive).count
         screen.resize(TerminalSize(columns: 10, rows: 24))
-        XCTAssertGreaterThan(screen.archive.count, before)
-        XCTAssertLessThan(screen.archive.count - before, 200)
-        let page = try screen.archive.page(after: before)
+        XCTAssertGreaterThan(try XCTUnwrap(screen.archive).count, before)
+        XCTAssertLessThan(try XCTUnwrap(screen.archive).count - before, 200)
+        let page = try XCTUnwrap(screen.archive).page(after: before)
         XCTAssertTrue(page.rows.contains { $0.ansi.contains("unique-0-") })
         XCTAssertNil(screen.error)
     }
@@ -90,20 +104,20 @@ private final class SilentTerminalDelegate: TerminalDelegate {
     func testGrowingThenShrinkingHeightDoesNotDuplicatePromotedHistoryRows() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let screen = try TerminalScreen(directory: root)
+        let screen = TerminalScreen(directory: root)
         for i in 0..<100 { screen.append(Data("line \(i)\r\n".utf8)) }
-        let count = screen.archive.count
+        let count = try XCTUnwrap(screen.archive).count
         screen.resize(TerminalSize(columns: 80, rows: 40))
         screen.resize(TerminalSize(columns: 80, rows: 24))
-        XCTAssertEqual(screen.archive.count, count)
+        XCTAssertEqual(try XCTUnwrap(screen.archive).count, count)
         screen.append(Data("new line\r\n".utf8))
-        XCTAssertEqual(screen.archive.count, count + 1)
+        XCTAssertEqual(try XCTUnwrap(screen.archive).count, count + 1)
     }
 
     func testRenderedStateMatchesAfterUnicodeSplitResizeAndAlternateScreen() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let screen = try TerminalScreen(directory: root)
+        let screen = TerminalScreen(directory: root)
         let display = Terminal(delegate: SilentTerminalDelegate(), options: TerminalOptions(cols: 80, rows: 24))
         let feed = TerminalFeed()
         let scrollback = RemoteScrollback(feed: feed)

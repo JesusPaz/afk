@@ -74,13 +74,17 @@ public final class TerminalHistory {
 
     public final class Reader {
         private let file: FileHandle
-        public let length: UInt64
+        public private(set) var length: UInt64
         public private(set) var offset: UInt64 = 0
         public init(_ entry: Entry) throws {
             file = try FileHandle(forReadingFrom: entry.directory.appendingPathComponent("output.afk"))
             length = try file.seekToEnd(); try file.seek(toOffset: 0)
         }
         deinit { try? file.close() }
+        func refreshLength() throws {
+            length = try file.seekToEnd()
+            try file.seek(toOffset: offset)
+        }
         /// Reads a bounded batch, ending only on a complete event boundary.
         public func next(maxBytes: Int = 64 * 1024) throws -> [TerminalEvent] {
             var events: [TerminalEvent] = [], bytes = 0

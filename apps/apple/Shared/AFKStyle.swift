@@ -73,7 +73,7 @@ struct InlineNotice: View {
 }
 
 struct TerminalCanvas: View {
-    let feed: AFKCore.TerminalFeed
+    @ObservedObject var feed: AFKCore.TerminalFeed
     let editable: Bool
     let input: (Data) -> Void
     let resize: (TerminalSize) -> Void
@@ -82,6 +82,12 @@ struct TerminalCanvas: View {
         TerminalSurface(feed: feed, editable: editable, input: input, resize: resize, active: active)
             .padding(8)
             .background(AFKStyle.terminalBackground)
+            .overlay {
+                if feed.isRestoringHistory {
+                    ProgressView(L10n.text("Recuperando historial…")).padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
     }
 }
 

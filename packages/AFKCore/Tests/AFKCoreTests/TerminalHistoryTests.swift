@@ -2,6 +2,32 @@ import XCTest
 @testable import AFKCore
 
 final class TerminalHistoryTests: XCTestCase {
+    @MainActor func testReplayYieldsIncludesConcurrentOutputAndCancelsOnDetach() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let history = try TerminalHistory(root: root, name: "Replay")
+        let feed = TerminalFeed(history: history)
+        let original = Data(repeating: 120, count: 512 * 1024)
+        feed.append(original)
+        var received = Data()
+        let observer = feed.observe(replayHistory: true) { events, _ in
+            for event in events { if let data = event.data { received.append(data) } }
+        }
+        XCTAssertTrue(feed.isRestoringHistory)
+        XCTAssertTrue(received.isEmpty, "Attaching must return before reading a long recording")
+        let live = Data("live".utf8)
+        feed.append(live)
+        for _ in 0..<500 where feed.isRestoringHistory { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertFalse(feed.isRestoringHistory)
+        XCTAssertEqual(received, original + live)
+        feed.remove(observer)
+        var batches = 0
+        let cancelled = feed.observe(replayHistory: true) { _, reset in if !reset { batches += 1 } }
+        feed.remove(cancelled)
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(batches, 0)
+        XCTAssertFalse(feed.isRestoringHistory)
+    }
     func testRecordingSurvivesReopenBeyondReplayLimitAndDeletesExplicitly() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

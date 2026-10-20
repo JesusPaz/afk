@@ -158,7 +158,10 @@ func (s *Store) RegisterClient(ctx context.Context, id, token, code, name string
 		}
 	} else if errors.Is(err, pgx.ErrNoRows) {
 		var count int
-		if err = tx.QueryRow(ctx, "SELECT count(*) FROM clients WHERE host_id=$1", h.ID).Scan(&count); err != nil {
+		// A rolling enrollment budget, not a lifetime device limit. Keep revoked
+		// rows as tombstones so freeing a slot never revives their credentials.
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM clients WHERE host_id=$1
+ AND revoked_at IS NULL AND created_at > now()-interval '24 hours'`, h.ID).Scan(&count); err != nil {
 			return Host{}, err
 		}
 		if count >= 64 {
