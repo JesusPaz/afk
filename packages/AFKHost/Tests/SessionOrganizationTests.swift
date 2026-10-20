@@ -32,7 +32,9 @@ final class SessionOrganizationTests: XCTestCase {
         defer { preferences.removePersistentDomain(forName: suite) }
         let host = HostController(preferences: preferences)
         defer { host.shutdown() }
-        let first = try XCTUnwrap(host.createGroup(name: "Load testing", symbol: "diamond", color: "teal"))
+        let first = try XCTUnwrap(host.createGroup(name: "Load testing", symbol: "terminal", color: "teal", emoji: "🛠️"))
+        XCTAssertEqual(first.symbol, "terminal")
+        XCTAssertEqual(first.emoji, "🛠️")
         let second = try XCTUnwrap(host.createGroup(name: "AFK"))
         host.reorderGroup(id: second.id, offset: -1)
         XCTAssertEqual(host.groups.map(\.id), [second.id, first.id])
@@ -71,6 +73,12 @@ final class SessionOrganizationTests: XCTestCase {
         for _ in 0..<100 where session.running { try await Task.sleep(for: .milliseconds(50)) }
         XCTAssertFalse(session.running)
         XCTAssertTrue(host.sessions.isEmpty)
+        XCTAssertEqual(host.groups, [group])
+        host.shutdown()
+        let restored = HostController(preferences: UserDefaults(suiteName: suite)!)
+        defer { restored.shutdown() }
+        XCTAssertEqual(restored.groups, [group])
+        XCTAssertTrue(restored.sessions.isEmpty)
         let recording = try XCTUnwrap(TerminalHistory.entries(root: directory).first)
         XCTAssertEqual(recording.name, "Pinned task")
         XCTAssertEqual(recording.group, group)

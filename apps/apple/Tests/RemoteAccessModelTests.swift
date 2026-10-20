@@ -2,6 +2,42 @@ import XCTest
 import AFKCore
 
 @MainActor final class RemoteAccessModelTests: XCTestCase {
+    func testReconnectWaitsForAuthorizedSessionListBeforeReattaching() throws {
+        let model = RemoteModel()
+        let session = SessionInfo(id: "reconnect", name: "Shell", running: true, owner: "local", epoch: 1)
+        var list = Message("sessions"); list.sessions = [session]
+        model.relay.onMessage?(list); model.attach(session.id)
+        let stale = try viewportMessage(model, session: session.id)
+        model.relay.onDisconnect?()
+        model.relay.onMessage?(Message("hostOnline"))
+        XCTAssertNil(model.viewportID, "Wait for the authorized session list")
+        model.relay.onMessage?(list)
+        XCTAssertNotNil(model.viewportID)
+        XCTAssertNotEqual(model.viewportID, stale.viewportID)
+        model.relay.onMessage?(stale)
+        XCTAssertFalse(model.ready)
+        model.relay.onMessage?(try viewportMessage(model, session: session.id))
+        XCTAssertTrue(model.ready)
+        model.suspend()
+    }
+
+    func testMalformedCurrentViewportShowsFailureInsteadOfRestoringForever() throws {
+        let model = RemoteModel()
+        var list = Message("sessions")
+        list.sessions = [SessionInfo(id: "malformed", name: "Shell", running: true, owner: "local", epoch: 1)]
+        model.relay.onMessage?(list); model.attach("malformed")
+        var frame = try viewportMessage(model, session: "malformed")
+        frame.historyOffset = 0
+        model.relay.onMessage?(frame)
+        XCTAssertFalse(model.ready)
+        XCTAssertNil(model.viewportID)
+        XCTAssertNotNil(model.sessionNotice)
+        XCTAssertEqual(model.terminalStatus, L10n.text("No se pudo abrir la sesión"))
+        model.relay.onMessage?(list)
+        XCTAssertNil(model.viewportID, "A failed viewport must not create a retry loop")
+        model.suspend()
+    }
+
     func testHiddenSessionsAreLocalToHostAndNeverSelectAnotherSession() throws {
         let suite = "AFKTests." + UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

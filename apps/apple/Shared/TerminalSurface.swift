@@ -5,6 +5,42 @@ import AFKCore
 #if os(macOS)
 typealias PlatformView = NSView
 
+final class FileDropTerminalView: TerminalView {
+    var acceptsFileInput: (() -> Bool)?
+    var fileInput: ((String) -> Void)?
+
+    func droppedPaths(_ pasteboard: NSPasteboard) -> String? {
+        guard acceptsFileInput?() == true,
+              let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+              !urls.isEmpty else { return nil }
+        var paths: [String] = []
+        for url in urls {
+            let path = url.path
+            // Terminal controls are interpreted before the shell can honor quoting.
+            guard url.isFileURL, !path.isEmpty,
+                  !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
+            paths.append("'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'")
+        }
+        let text = paths.joined(separator: " ") + " "
+        guard text.utf8.count <= 16 * 1024 else { return nil }
+        return text
+    }
+
+    @discardableResult func receiveFiles(_ pasteboard: NSPasteboard) -> Bool {
+        guard let text = droppedPaths(pasteboard), let fileInput else { return false }
+        fileInput(text)
+        window?.makeFirstResponder(self)
+        return true
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        droppedPaths(sender.draggingPasteboard) == nil ? [] : .copy
+    }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { draggingEntered(sender) }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { droppedPaths(sender.draggingPasteboard) != nil }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { receiveFiles(sender.draggingPasteboard) }
+}
+
 private final class TerminalStage: NSView {
     override var isFlipped: Bool { true }
 }
@@ -33,7 +69,9 @@ final class TerminalContainer: PlatformView {
 
     override init(frame: CGRect) {
         #if os(macOS)
-        terminal = TerminalView(frame: .zero, font: AFKStyle.terminalFont)
+        let fileTerminal = FileDropTerminalView(frame: .zero, font: AFKStyle.terminalFont)
+        fileTerminal.registerForDraggedTypes([.fileURL])
+        terminal = fileTerminal
         #else
         terminal = TerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: AFKStyle.terminalFontSize, weight: .regular))
         #endif
@@ -169,6 +207,19 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
         let view = container.terminal
         view.terminalDelegate = self
         feed.onCancelApplicationScroll = { [weak self] in self?.cancelApplicationScroll() }
+        #if os(macOS)
+        if let fileTerminal = view as? FileDropTerminalView {
+            fileTerminal.acceptsFileInput = { [weak self] in
+                guard let self else { return false }
+                return self.active && self.editable && !self.replaying && !self.attaching
+            }
+            fileTerminal.fileInput = { [weak self, weak view] text in
+                guard let self, let view else { return }
+                let paste = view.getTerminal().bracketedPasteMode ? "\u{1b}[200~" + text + "\u{1b}[201~" : text
+                self.send(source: view, data: Array(paste.utf8)[...])
+            }
+        }
+        #endif
         #if os(iOS)
         view.alwaysBounceVertical = true
         view.panGestureRecognizer.addTarget(self, action: #selector(historyPan(_:)))
@@ -222,7 +273,7 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
             self.replaying = false
         }
     }
-    func detach() { cancelApplicationScroll(); feed.onCancelApplicationScroll = nil; pending?.cancel(); if let observation { feed.remove(observation) } }
+    func detach() { active = false; cancelApplicationScroll(); feed.onCancelApplicationScroll = nil; pending?.cancel(); if let observation { feed.remove(observation) } }
     func send(source: TerminalView, data: ArraySlice<UInt8>) { if active && editable && !replaying && !attaching { input(Data(data)) } }
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {}
     func setTerminalTitle(source: TerminalView, title: String) {}

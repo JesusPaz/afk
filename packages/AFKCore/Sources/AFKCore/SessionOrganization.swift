@@ -2,13 +2,20 @@ import Foundation
 
 public struct SessionGroup: Codable, Identifiable, Equatable {
     public static let colors = ["blue", "purple", "teal", "orange", "pink", "gray"]
-    public static let symbols = ["diamond", "square", "hexagon", "circle", "triangle", "folder"]
+    public static let symbols = ["diamond", "square", "hexagon", "circle", "triangle", "folder", "terminal", "chevron.left.forwardslash.chevron.right", "server.rack", "cloud", "wrench.and.screwdriver", "star"]
     public var id: String
     public var name: String
     public var symbol: String
     public var color: String
-    public init(id: String = UUID().uuidString, name: String, symbol: String = "folder", color: String = "blue") {
-        self.id = id; self.name = name; self.symbol = symbol; self.color = color
+    public var emoji: String?
+    public init(id: String = UUID().uuidString, name: String, symbol: String = "folder", color: String = "blue", emoji: String? = nil) {
+        self.id = id; self.name = name; self.symbol = symbol; self.color = color; self.emoji = Self.cleanEmoji(emoji)
+    }
+    public static func cleanEmoji(_ value: String?) -> String? {
+        guard let value, value.count == 1, value.unicodeScalars.count <= 32,
+              value.unicodeScalars.contains(where: { $0.properties.isEmoji && ($0.value > 127 || value.unicodeScalars.contains("\u{20E3}")) }),
+              !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) && $0.value != 0x200D }) else { return nil }
+        return value
     }
 }
 

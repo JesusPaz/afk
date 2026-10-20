@@ -438,3 +438,27 @@
 "No se pudo confirmar el cierre de todas las terminales" = "Could not confirm that all terminals closed";
 
 "AFK seguirá abierto para que puedas revisar las sesiones que aún se están cerrando. El acceso remoto quedó desconectado." = "AFK will stay open so you can review sessions that are still closing. Remote access was disconnected.";
+
+"Terminal" = "Terminal";
+
+"Código" = "Code";
+
+"Nube" = "Cloud";
+
+"Herramientas" = "Tools";
+
+"Estrella" = "Star";
+
+"Emoji" = "Emoji";
+
+"Elegir emoji…" = "Choose emoji…";
+
+"El Mac no envió la pantalla a tiempo. Vuelve a conectar." = "The Mac did not send the screen in time. Reconnect.";
+
+"El Mac envió una pantalla no válida. Actualiza ambas apps y vuelve a conectar." = "The Mac sent an invalid screen. Update both apps and reconnect.";
+
+"La conexión agotó el tiempo de espera. Comprueba que el Mac esté despierto y conectado." = "The connection timed out. Check that your Mac is awake and connected.";
+
+"No se pudo establecer la conexión segura. Comprueba la red y el acceso remoto en el Mac." = "Could not establish the secure connection. Check the network and remote access on your Mac.";
+
+"Copiar diagnóstico" = "Copy diagnostics";

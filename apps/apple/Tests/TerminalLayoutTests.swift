@@ -4,6 +4,70 @@ import XCTest
 import AFKCore
 
 final class TerminalLayoutTests: XCTestCase {
+    @MainActor func testFileDropQuotesPathsWithoutExecutingCommands() throws {
+        _ = NSApplication.shared
+        let container = TerminalContainer(frame: .zero)
+        let terminal = try XCTUnwrap(container.terminal as? FileDropTerminalView)
+        var input: [Data] = []
+        let coordinator = TerminalCoordinator(feed: TerminalFeed(), editable: true, input: { input.append($0) }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        let paths = ["/tmp/Screenshot 2026-10-19.png", "/tmp/it's $(printf injected); `printf wrong` \"café\".png"]
+        board.writeObjects(paths.map { URL(fileURLWithPath: $0) as NSURL })
+        XCTAssertTrue(terminal.receiveFiles(board))
+        let inserted = try XCTUnwrap(String(data: try XCTUnwrap(input.first), encoding: .utf8))
+        XCTAssertFalse(inserted.contains("\n"))
+        XCTAssertFalse(inserted.contains("\r"))
+        XCTAssertEqual(input.count, 1)
+        // Parse the actual inserted command line in the user's default shell. Metacharacters
+        // must round-trip as filenames rather than commands, expansions or split arguments.
+        let shell = Process()
+        shell.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        shell.arguments = ["-f", "-c", "printf '%s\\0' " + inserted]
+        let output = Pipe(); shell.standardOutput = output
+        try shell.run()
+        let result = output.fileHandleForReading.readDataToEndOfFile()
+        shell.waitUntilExit()
+        XCTAssertEqual(shell.terminationStatus, 0)
+        // NSURL uses decomposed Unicode for filesystem paths on macOS. Compare
+        // arguments as Swift strings (canonical equivalence), preserving separators.
+        let arguments = try XCTUnwrap(String(data: result, encoding: .utf8))
+        XCTAssertEqual(arguments.split(separator: "\0", omittingEmptySubsequences: false).map(String.init), paths + [""])
+    }
+
+    @MainActor func testFileDropRespectsControlAndRejectsTerminalControls() throws {
+        _ = NSApplication.shared
+        let container = TerminalContainer(frame: .zero)
+        let terminal = try XCTUnwrap(container.terminal as? FileDropTerminalView)
+        var input: [Data] = []
+        let coordinator = TerminalCoordinator(feed: TerminalFeed(), editable: true, input: { input.append($0) }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        board.writeObjects([URL(fileURLWithPath: "/tmp/example.png") as NSURL])
+        coordinator.editable = false
+        XCTAssertFalse(terminal.receiveFiles(board))
+        coordinator.editable = true; coordinator.active = false
+        XCTAssertFalse(terminal.receiveFiles(board))
+        coordinator.active = true
+        for path in ["/tmp/evil\ncommand", "/tmp/evil\rcommand", "/tmp/evil\u{1b}[201~", "/tmp/evil\tcommand"] {
+            board.clearContents(); board.writeObjects([URL(fileURLWithPath: path) as NSURL])
+            XCTAssertFalse(terminal.receiveFiles(board))
+        }
+        board.clearContents(); board.setString("echo not a file", forType: .string)
+        XCTAssertFalse(terminal.receiveFiles(board))
+        XCTAssertTrue(input.isEmpty)
+        board.clearContents(); board.writeObjects([URL(fileURLWithPath: "/tmp/example.png") as NSURL])
+        container.terminal.feed(text: "\u{1b}[?2004h")
+        XCTAssertTrue(terminal.receiveFiles(board))
+        XCTAssertEqual(input, [Data("\u{1b}[200~'/tmp/example.png' \u{1b}[201~".utf8)])
+        coordinator.detach()
+        XCTAssertFalse(terminal.receiveFiles(board))
+    }
+
     @MainActor func testInactiveTerminalNeverReceivesKeyboardInput() {
         _ = NSApplication.shared
         let feed = TerminalFeed()

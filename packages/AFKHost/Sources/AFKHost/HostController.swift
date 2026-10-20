@@ -128,16 +128,16 @@ public final class HostController: ObservableObject {
         guard groupID == nil || groups.contains(where: { $0.id == groupID }) else { return }
         sessions.first(where: { $0.id == id })?.groupID = groupID; organizationChanged()
     }
-    @discardableResult public func createGroup(name: String, symbol: String = "folder", color: String = "blue") -> SessionGroup? {
+    @discardableResult public func createGroup(name: String, symbol: String = "folder", color: String = "blue", emoji: String? = nil) -> SessionGroup? {
         guard let name = SessionMetadata.clean(name), groups.count < 64 else { return nil }
         let group = SessionGroup(name: name, symbol: SessionGroup.symbols.contains(symbol) ? symbol : "folder",
-                                 color: SessionGroup.colors.contains(color) ? color : "blue")
+                                 color: SessionGroup.colors.contains(color) ? color : "blue", emoji: emoji)
         groups.append(group); organizationChanged(); return group
     }
     public func updateGroup(_ group: SessionGroup) {
         guard let index = groups.firstIndex(where: { $0.id == group.id }), let name = SessionMetadata.clean(group.name) else { return }
         groups[index] = SessionGroup(id: group.id, name: name, symbol: SessionGroup.symbols.contains(group.symbol) ? group.symbol : "folder",
-                                    color: SessionGroup.colors.contains(group.color) ? group.color : "blue")
+                                    color: SessionGroup.colors.contains(group.color) ? group.color : "blue", emoji: group.emoji)
         organizationChanged()
     }
     public func deleteGroup(id: String) {

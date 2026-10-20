@@ -130,7 +130,7 @@ struct PhoneHome: View {
                                     ForEach(activeSessions.filter { $0.group?.id == group.id }) { session in sessionRow(session) }
                                 } label: {
                                     HStack {
-                                        Label(group.name, systemImage: group.symbol).foregroundStyle(AFKStyle.groupColor(group.color))
+                                        Label { Text(group.name) } icon: { SessionGroupMark(group: group) }.foregroundStyle(AFKStyle.groupColor(group.color))
                                         Spacer()
                                         Text(String(activeSessions.filter { $0.group?.id == group.id }.count)).foregroundStyle(.secondary)
                                     }
@@ -288,7 +288,14 @@ struct PhoneTerminal: View {
                 }
                 Label(model.terminalStatus, systemImage: model.canWrite ? "keyboard" : "eye")
                     .font(.subheadline.weight(.medium))
-                if let notice = model.sessionNotice { InlineNotice(text: notice) }
+                if let notice = model.sessionNotice { InlineNotice(text: notice).textSelection(.enabled) }
+                if let diagnostic = model.diagnostic {
+                    Button(L10n.text("Copiar diagnóstico"), systemImage: "doc.on.doc") {
+                        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+                        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+                        UIPasteboard.general.string = diagnostic + " | iOS " + UIDevice.current.systemVersion + " | AFK " + version + " (" + build + ")"
+                    }.font(.caption).frame(minHeight: 44)
+                }
                 if model.loadingHistory { ProgressView() }
                 if let expiry = model.selectedInfo?.controlExpiresAt {
                     Text(L10n.text("Control autorizado hasta") + " " + expiry.formatted(date: .omitted, time: .shortened)).font(.caption)

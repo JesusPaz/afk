@@ -18,6 +18,7 @@ final class RemoteModel: ObservableObject {
     private lazy var scrollback = RemoteScrollback(feed: feed)
     @Published var loadingHistory = false
     private var viewportAck: Task<Void, Never>?
+    private var attachmentTimeout: Task<Void, Never>?
     private var prefetchedHistory = false
     func scrollHistory(older: Bool) {
         guard ready || selectedInfo?.running == false, viewportID != nil else { return }
@@ -49,6 +50,7 @@ final class RemoteModel: ObservableObject {
     }
     private func clearHistory() {
         viewportAck?.cancel(); viewportAck = nil
+        attachmentTimeout?.cancel(); attachmentTimeout = nil
         prefetchedHistory = false
         viewportID = nil; viewportBytes = Data(); viewportSequence = nil
         scrollback.clear(); loadingHistory = false
@@ -101,6 +103,7 @@ final class RemoteModel: ObservableObject {
     @Published var status = L10n.text("Sin conexión")
     @Published var ready = false
     @Published var sessionNotice: String?
+    @Published private(set) var diagnostic: String?
     @Published var owner = ""
     @Published var hostName = L10n.text("Tu Mac")
     @Published var linked = false
@@ -141,7 +144,13 @@ final class RemoteModel: ObservableObject {
         feed.onApplicationScroll = { [weak self] in self?.scrollApplication($0) ?? false }
         relay.onMessage = { [weak self] in self?.receive($0) }
         relay.onDisconnect = { [weak self] in
-            self?.clearTerminal(); self?.sessions = []; self?.canCreate = false; self?.hostAvailable = false
+            guard let self else { return }
+            let pendingInput = self.inputBuffer.hasPendingInput
+            self.clearTerminal(); self.sessions = []; self.canCreate = false; self.hostAvailable = false
+            if let failure = self.relay.failure {
+                self.diagnostic = self.relay.diagnostic
+                self.sessionNotice = [pendingInput ? self.sessionNotice : nil, failure].compactMap { $0 }.joined(separator: "\n")
+            }
         }
         pairingSubscription = relay.$comparisonCode.sink { [weak self] in self?.comparisonCode = $0 }
         subscription = relay.$status.sink { [weak self] in self?.status = $0 }
@@ -180,7 +189,7 @@ final class RemoteModel: ObservableObject {
         guard !unlock.isBusy, !reconnecting, !pairing else { return }
         cancelInput()
         clearHistory()
-        ready = false; reconnecting = true
+        ready = false; sessionNotice = nil; reconnecting = true
         Task {
             defer { reconnecting = false }
             do {
@@ -199,6 +208,21 @@ final class RemoteModel: ObservableObject {
         viewportID = UUID().uuidString
         var request = Message("attach", sessionID: id); request.viewportID = viewportID
         relay.send(request)
+        scheduleAttachmentTimeout()
+    }
+    private func scheduleAttachmentTimeout() {
+        attachmentTimeout?.cancel()
+        let attachment = viewportID
+        attachmentTimeout = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            guard let self, self.viewportID == attachment, !self.ready else { return }
+            self.failAttachment("El Mac no envió la pantalla a tiempo. Vuelve a conectar.", reason: "timeout")
+        }
+    }
+    private func failAttachment(_ message: String, reason: String = "invalid") {
+        clearHistory(); cancelInput(); ready = false
+        sessionNotice = L10n.text(message)
+        diagnostic = "AFK connection | \(Date().ISO8601Format()) | viewport | \(reason)"
     }
     func claim() { guard canClaim else { return }; scrollback.returnToLive(); loadingHistory = false; relay.send(Message("claim", sessionID: selected)); objectWillChange.send() }
     func release() { cancelInput(); if owner == credentials?.clientID { relay.send(Message("release", sessionID: selected)) }; owner = "" }
@@ -234,30 +258,39 @@ final class RemoteModel: ObservableObject {
     private func receive(_ m: Message) {
         switch m.type {
         case "welcome": relay.send(Message("list"))
-        case "hostOnline": hostAvailable = true; relay.send(Message("list")); if let selected { attach(selected) }
+        case "hostOnline": hostAvailable = true; relay.send(Message("list"))
         case "hostOffline": clearHistory(); cancelInput(); hostAvailable = false; ready = false; owner = ""; status = L10n.text("El Mac no está disponible")
         case "sessions":
             hostAvailable = true; sessions = m.sessions ?? []; canCreate = m.canCreate == true
             if let selected, !sessions.contains(where: { $0.id == selected }) {
                 clearTerminal(); self.selected = nil; sessionNotice = L10n.text("El Mac retiró el acceso a esta sesión.")
             } else if !canClaim { cancelInput(); owner = "" }
+            if let selected, !ready, viewportID == nil, sessionNotice == nil { attach(selected) }
 
         case "viewport":
-            guard m.sessionID == selected, selectedInfo != nil, let id = viewportID, m.viewportID == id,
-                  let bytes = m.data.flatMap({ Data(base64Encoded: $0) }), let sequence = m.sequence,
+            guard m.sessionID == selected, selectedInfo != nil, let id = viewportID, m.viewportID == id else { return }
+            guard let bytes = m.data.flatMap({ Data(base64Encoded: $0) }), let sequence = m.sequence,
                   let offset = m.historyOffset, let length = m.historyLength,
-                  length <= 8 * 1024 * 1024, offset <= length else { return }
+                  length <= 8 * 1024 * 1024, offset <= length, bytes.count <= 24 * 1024 else {
+                failAttachment("El Mac envió una pantalla no válida. Actualiza ambas apps y vuelve a conectar."); return
+            }
             if viewportSequence != sequence {
                 guard viewportSequence == nil || sequence > viewportSequence! else { return }
                 viewportSequence = sequence; viewportBytes = Data()
             }
-            guard offset == UInt64(viewportBytes.count + bytes.count) else { return }
+            guard offset == UInt64(viewportBytes.count + bytes.count) else {
+                failAttachment("El Mac envió una pantalla no válida. Actualiza ambas apps y vuelve a conectar."); return
+            }
             viewportBytes.append(bytes)
+            if !ready { scheduleAttachmentTimeout() }
             if m.historyComplete == true {
                 guard offset == length, let viewport = try? JSONDecoder().decode(TerminalViewport.self, from: viewportBytes),
                       viewport.sequence == sequence, viewport.size.isValid, viewport.rows.count == viewport.size.rows,
                       viewport.rows.allSatisfy({ $0.columns == viewport.size.columns }),
-                      (0..<viewport.size.columns).contains(viewport.cursorX), (0..<viewport.size.rows).contains(viewport.cursorY) else { return }
+                      (0..<viewport.size.columns).contains(viewport.cursorX), (0..<viewport.size.rows).contains(viewport.cursorY) else {
+                    failAttachment("El Mac envió una pantalla no válida. Actualiza ambas apps y vuelve a conectar."); return
+                }
+                attachmentTimeout?.cancel(); attachmentTimeout = nil
                 scrollback.update(viewport); viewportBytes = Data()
                 inputAcknowledgements = m.inputAcknowledgements == true
                 if owner != (m.owner ?? "") || epoch != m.epoch { cancelInput() }
@@ -293,7 +326,7 @@ final class RemoteModel: ObservableObject {
             relay.send(reply)
         case "snapshot":
             guard m.sessionID == selected, selectedInfo != nil, let events = m.events, feed.reset(events, sequence: m.sequence ?? 0) else { return }
-            viewportID = nil
+            viewportID = nil; attachmentTimeout?.cancel(); attachmentTimeout = nil
             if owner != (m.owner ?? "") || epoch != m.epoch { cancelInput() }
             inputAcknowledgements = m.inputAcknowledgements == true
             if !inputAcknowledgements { sessionNotice = L10n.text("Actualiza AFK en el Mac para escribir con confirmación de entrega.") }
