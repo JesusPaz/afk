@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import LocalAuthentication
+import OSLog
 
 private struct ControlOffer: Decodable { let type: String; let id: String; let clientID: String }
 private struct SecureHostConnection: Codable { let id: String; let token: String }
@@ -236,6 +237,8 @@ public struct SecurePhoneConnection: Codable {
 
 @MainActor public final class SecurePhoneRelay: ObservableObject {
     @Published public private(set) var status = L10n.text("Sin conexión")
+    @Published public private(set) var failure: String?
+    public private(set) var diagnostic: String?
     public var onMessage: ((Message) -> Void)?
     public var onDisconnect: (() -> Void)?
     private var transport: SecureTransport?
@@ -299,7 +302,7 @@ public struct SecurePhoneConnection: Codable {
         connect(using: saved)
     }
     private func connect(using saved: SecurePhoneConnection, context: LAContext = LAContext()) {
-        disconnect()
+        disconnect(); connectionError = nil
         signingContext = context
         var approvalID: String?
         let clock = ContinuousClock()
@@ -308,7 +311,7 @@ public struct SecurePhoneConnection: Codable {
         let transport = SecureTransport(); self.transport = transport
         status = L10n.text("Conectando…")
         let nonce: String
-        do { nonce = try SecretStore.randomToken() } catch { disconnect(); return }
+        do { nonce = try SecretStore.randomToken() } catch { connectionFailed(error); return }
         transport.onReady = { [weak self, weak transport] _ in
             guard let self, let transport, self.transport === transport else { return }
             var hello = SecurePacket(type: "hello"); hello.server = saved.server; hello.hostID = saved.credentials.host.id
@@ -341,7 +344,7 @@ public struct SecurePhoneConnection: Codable {
                             self.timeout?.cancel()
                             self.timeout = Task { [weak self, weak transport] in
                                 try? await Task.sleep(for: .seconds(max(0, min(120, invite.expires.timeIntervalSinceNow))))
-                                guard !Task.isCancelled, let self, self.transport === transport else { return }; self.disconnect()
+                                guard !Task.isCancelled, let self, self.transport === transport else { return }; self.connectionFailed(URLError(.timedOut))
                             }
                             return
                         }
@@ -356,22 +359,50 @@ public struct SecurePhoneConnection: Codable {
                     guard packet.type == "message", let m = packet.message else { throw SecureError.protocolViolation }
                     self.onMessage?(m)
                 }
-            } catch { self.connectionError = error; self.disconnect() }
+            } catch { self.connectionFailed(error) }
         }
-        transport.onClose = { [weak self, weak transport] in guard let self, self.transport === transport else { return }; self.disconnect() }
+        transport.onClose = { [weak self, weak transport] in guard let self, self.transport === transport else { return }; self.connectionFailed(SecureError.disconnected) }
         timeout = Task { [weak self, weak transport] in
-            try? await Task.sleep(for: .seconds(60)); guard !Task.isCancelled, let self, self.transport === transport else { return }; self.disconnect()
+            try? await Task.sleep(for: .seconds(60)); guard !Task.isCancelled, let self, self.transport === transport else { return }; self.connectionFailed(URLError(.timedOut))
         }
         Task { [weak self, weak transport] in
             guard let transport else { return }
             do { try await transport.connect(base: URL(string: saved.server)!, path: "v2/connect", token: saved.credentials.token, identity: saved.identity, server: false, authenticationContext: context, accepts: { DeviceIdentity.fingerprint($0) == saved.hostFingerprint }) }
-            catch { if let self, self.transport === transport { self.disconnect() } }
+            catch { if let self, self.transport === transport { self.connectionFailed(error) } }
         }
     }
     public func send(_ m: Message) { guard authorized else { return }; var p = SecurePacket(type: "message"); p.message = m; transport?.send(p) }
-    public func disconnect() {
+    func connectionFailed(_ error: Error) {
+        connectionError = error
+        let message: String
+        let reason: String
+        if let secure = error as? SecureError {
+            message = secure.localizedDescription
+            switch secure {
+            case .unauthorized: reason = "identity"
+            case .protocolViolation: reason = "protocol"
+            case .persistence: reason = "storage"
+            case .hardwareUnavailable, .biometryUnavailable: reason = "authentication"
+            case .invalidInvitation, .obsoleteInvitation: reason = "invitation"
+            case .disconnected: reason = "closed"
+            }
+        } else if (error as? URLError)?.code == .timedOut {
+            reason = "timeout"
+            message = L10n.text("La conexión agotó el tiempo de espera. Comprueba que el Mac esté despierto y conectado.")
+        } else {
+            reason = "connection"
+            message = L10n.text("No se pudo establecer la conexión segura. Comprueba la red y el acceso remoto en el Mac.")
+        }
+        let diagnostic = "AFK connection | \(Date().ISO8601Format()) | \(authorized ? "established" : "handshake") | \(reason)"
+        self.diagnostic = diagnostic
+        Logger(subsystem: "app.afk", category: "connection").error("\(diagnostic, privacy: .public)")
+        disconnect(failure: message)
+    }
+    public func disconnect() { disconnect(failure: nil) }
+    private func disconnect(failure: String?) {
+        self.failure = failure
         signingContext?.invalidate(); signingContext = nil
         generation = UUID(); comparisonCode = nil; let closing = transport; transport = nil; closing?.close(); timeout?.cancel(); timeout = nil; authorized = false
-        status = L10n.text("Sin conexión"); onDisconnect?()
+        status = failure ?? L10n.text("Sin conexión"); onDisconnect?()
     }
 }

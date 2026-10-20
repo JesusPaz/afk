@@ -270,10 +270,10 @@ struct MacWorkspace: View {
             SessionNameEditor(session: session) { host.renameSession(id: session.id, label: $0) }
         }
         .sheet(isPresented: $showingGroupEditor) {
-            SessionGroupEditor(group: editingGroup) { name, symbol, color in
+            SessionGroupEditor(group: editingGroup) { name, symbol, color, emoji in
                 if let group = editingGroup {
-                    host.updateGroup(SessionGroup(id: group.id, name: name, symbol: symbol, color: color))
-                } else { _ = host.createGroup(name: name, symbol: symbol, color: color) }
+                    host.updateGroup(SessionGroup(id: group.id, name: name, symbol: symbol, color: color, emoji: emoji))
+                } else { _ = host.createGroup(name: name, symbol: symbol, color: color, emoji: emoji) }
             }
         }
         .confirmationDialog(forceClosing ? L10n.text("¿Forzar cierre?") : L10n.text("¿Cerrar y quitar esta sesión?"),
@@ -315,7 +315,7 @@ struct MacWorkspace: View {
             Button(L10n.text("Sin grupo")) { host.moveSession(id: session.id, groupID: nil) }
             ForEach(host.groups) { group in
                 Button { host.moveSession(id: session.id, groupID: group.id) } label: {
-                    Label(group.name, systemImage: group.symbol)
+                    Label { Text(group.name) } icon: { SessionGroupMark(group: group) }
                 }
             }
         }
@@ -913,20 +913,23 @@ struct SessionNameEditor: View {
 
 struct SessionGroupEditor: View {
     let group: SessionGroup?
-    let save: (String, String, String) -> Void
+    let save: (String, String, String, String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var symbol: String
     @State private var color: String
+    @State private var emoji: String
+    @FocusState private var emojiFocused: Bool
     @FocusState private var focused: Bool
-    private let symbols = [("diamond", "Diamante"), ("square", "Cuadrado"), ("hexagon", "Hexágono"), ("circle", "Círculo"), ("triangle", "Triángulo"), ("folder", "Carpeta")]
+    private let symbols = [("diamond", "Diamante"), ("square", "Cuadrado"), ("hexagon", "Hexágono"), ("circle", "Círculo"), ("triangle", "Triángulo"), ("folder", "Carpeta"), ("terminal", "Terminal"), ("chevron.left.forwardslash.chevron.right", "Código"), ("server.rack", "Servidor"), ("cloud", "Nube"), ("wrench.and.screwdriver", "Herramientas"), ("star", "Estrella")]
     private let colors = [("blue", "Azul"), ("purple", "Morado"), ("teal", "Verde azulado"), ("orange", "Naranja"), ("pink", "Rosa"), ("gray", "Gris")]
 
-    init(group: SessionGroup?, save: @escaping (String, String, String) -> Void) {
+    init(group: SessionGroup?, save: @escaping (String, String, String, String?) -> Void) {
         self.group = group; self.save = save
         _name = State(initialValue: group?.name ?? "")
         _symbol = State(initialValue: group?.symbol ?? "diamond")
         _color = State(initialValue: group?.color ?? "blue")
+        _emoji = State(initialValue: group?.emoji ?? "")
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -935,23 +938,38 @@ struct SessionGroupEditor: View {
                 .onSubmit { submit() }
             VStack(alignment: .leading, spacing: 10) {
                 Text(L10n.text("Símbolo")).font(.headline)
-                HStack(spacing: 10) {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(36), spacing: 10), count: 6), alignment: .leading, spacing: 10) {
                     ForEach(symbols, id: \.0) { item in
-                        Button { symbol = item.0 } label: {
+                        Button { symbol = item.0; emoji = "" } label: {
                             Image(systemName: item.0).font(.title3).frame(width: 36, height: 32)
                                 .foregroundStyle(AFKStyle.groupColor(color))
-                                .background(symbol == item.0 ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
-                                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(symbol == item.0 ? Color.primary : .clear))
+                                .background(emoji.isEmpty && symbol == item.0 ? Color.primary.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(emoji.isEmpty && symbol == item.0 ? Color.primary : .clear))
                         }.buttonStyle(.plain).accessibilityLabel(L10n.text(item.1))
-                            .accessibilityAddTraits(symbol == item.0 ? .isSelected : [])
+                            .accessibilityAddTraits(emoji.isEmpty && symbol == item.0 ? .isSelected : [])
                     }
                 }
             }
-            Picker(L10n.text("Color"), selection: $color) {
-                ForEach(colors, id: \.0) { item in Text(L10n.text(item.1)).tag(item.0) }
-            }.pickerStyle(.segmented)
             HStack(spacing: 10) {
-                Image(systemName: symbol).foregroundStyle(AFKStyle.groupColor(color))
+                TextField(L10n.text("Emoji"), text: $emoji)
+                    .textFieldStyle(.roundedBorder).frame(width: 64).focused($emojiFocused)
+                    .onChange(of: emoji) { _, value in emoji = String(value.prefix(1)) }
+                Button(L10n.text("Elegir emoji…")) {
+                    emojiFocused = true
+                    DispatchQueue.main.async {
+                        NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+                        NSApp.orderFrontCharacterPalette(nil)
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.text("Color")).font(.headline)
+                Picker(L10n.text("Color"), selection: $color) {
+                    ForEach(colors, id: \.0) { item in Text(L10n.text(item.1)).tag(item.0) }
+                }.pickerStyle(.segmented).labelsHidden()
+            }
+            HStack(spacing: 10) {
+                SessionGroupMark(group: SessionGroup(name: name, symbol: symbol, color: color, emoji: emoji))
                 Text(name.isEmpty ? L10n.text("Nombre del grupo") : name).fontWeight(.medium).lineLimit(1)
             }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
@@ -961,13 +979,14 @@ struct SessionGroupEditor: View {
                 Spacer()
                 Button(L10n.text("Cancelar")) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(L10n.text("Guardar")) { submit() }.keyboardShortcut(.defaultAction)
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!emoji.isEmpty && SessionGroup.cleanEmoji(emoji) == nil))
             }
         }.padding(24).frame(width: 480).onAppear { focused = true }
     }
     private func submit() {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
-        save(value, symbol, color); dismiss()
+        guard emoji.isEmpty || SessionGroup.cleanEmoji(emoji) != nil else { return }
+        save(value, symbol, color, SessionGroup.cleanEmoji(emoji)); dismiss()
     }
 }

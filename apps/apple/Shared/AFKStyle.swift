@@ -88,7 +88,10 @@ struct TerminalCanvas: View {
 struct SessionGroupMark: View {
     let group: SessionGroup?
     var body: some View {
-        Image(systemName: group?.symbol ?? "terminal")
+        Group {
+            if let emoji = SessionGroup.cleanEmoji(group?.emoji) { Text(emoji) }
+            else { Image(systemName: group?.symbol ?? "terminal") }
+        }
             .foregroundStyle(group.map { AFKStyle.groupColor($0.color) } ?? .secondary)
             .frame(width: 20)
             .accessibilityHidden(true)

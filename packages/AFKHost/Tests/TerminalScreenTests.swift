@@ -9,6 +9,22 @@ private final class SilentTerminalDelegate: TerminalDelegate {
 }
 
 @MainActor final class TerminalScreenTests: XCTestCase {
+    func testViewportRowsMatchWidthAfterMacAndPhoneResizes() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let screen = try TerminalScreen(directory: root)
+        screen.append(Data("\u{1b}[?1049h".utf8))
+        for size in [TerminalSize(columns: 280, rows: 80), TerminalSize(columns: 43, rows: 13), TerminalSize(columns: 137, rows: 43)] {
+            screen.resize(size)
+            screen.append(Data("\u{1b}[Hhello".utf8))
+            let view = screen.snapshot(sequence: 1)
+            XCTAssertEqual(view.rows.count, size.rows)
+            XCTAssertTrue(view.rows.allSatisfy { $0.columns == size.columns })
+            XCTAssertTrue((0..<size.columns).contains(view.cursorX))
+            XCTAssertTrue((0..<size.rows).contains(view.cursorY))
+        }
+    }
+
     func testCodexAlternateScreenScrollSurvivesPhoneResizeWithoutSendingInput() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

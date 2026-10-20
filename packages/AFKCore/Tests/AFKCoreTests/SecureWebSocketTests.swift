@@ -6,6 +6,28 @@ import CryptoKit
 @testable import AFKCore
 
 @MainActor final class SecureWebSocketTests: XCTestCase {
+    func testConnectionFailureReportsSafeReasonAndExplicitDisconnectClearsIt() {
+        let relay = SecurePhoneRelay()
+        var callbackReason: String?
+        relay.onDisconnect = { callbackReason = relay.failure }
+        relay.connectionFailed(NSError(domain: "private-domain", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "secret token and terminal contents"]))
+        XCTAssertNotNil(callbackReason)
+        XCTAssertEqual(relay.status, relay.failure)
+        XCTAssertFalse(relay.status.contains("secret"))
+        XCTAssertFalse(relay.status.contains("private-domain"))
+        XCTAssertTrue(relay.diagnostic?.hasSuffix("| handshake | connection") == true)
+        XCTAssertFalse(relay.diagnostic?.contains("secret") == true)
+        XCTAssertFalse(relay.diagnostic?.contains("private-domain") == true)
+        relay.connectionFailed(URLError(.timedOut))
+        XCTAssertEqual(relay.failure, L10n.text("La conexión agotó el tiempo de espera. Comprueba que el Mac esté despierto y conectado."))
+        relay.connectionFailed(SecureError.unauthorized)
+        XCTAssertEqual(relay.failure, SecureError.unauthorized.localizedDescription)
+        relay.disconnect()
+        XCTAssertNil(relay.failure)
+        XCTAssertEqual(relay.status, L10n.text("Sin conexión"))
+    }
+
     func testFrameCoalescedWithHTTPUpgradeIsNotDiscarded() async throws {
         let listener = try await ServerBootstrap(group: MultiThreadedEventLoopGroup.singleton)
             .childChannelInitializer { $0.pipeline.addHandler(CoalescedUpgrade()) }

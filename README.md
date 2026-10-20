@@ -34,7 +34,18 @@ When launching a built Mac app from an automation terminal, use `./scripts/dev-m
 
 AFK sessions advertise `TERM=xterm-256color`, `COLORTERM=truecolor` and `TERM_PROGRAM=AFK`, and discard an inherited `TERM_PROGRAM_VERSION` belonging to another terminal. Normal app launches preserve color preferences, including `NO_COLOR`; shell startup files can also set these explicitly. AFK does not force applications to emit color.
 
+On Mac, drag files from Finder onto the active terminal to insert their shell-quoted
+paths. Multiple files, spaces and quotes are supported; dropping never presses Enter.
+The Mac must have typing control. This inserts local paths, not file uploads.
+
 AFK connects to the saved relay when the Mac app opens, unless remote access was explicitly paused. Pausing persists across launches. Development builds signed ad hoc may ask for Keychain authorization again after recompilation; use a consistent Apple signing identity for a stable development identity.
+
+If an iPhone session cannot open, its error remains visible and **Copy diagnostics**
+copies the failure time, connection stage/category, iOS version and AFK build.
+Diagnostics contain no terminal text, file paths, server addresses or credentials.
+After reconnecting, the phone waits for the authorized session list before restoring
+the selected session. Update both apps for the fix to Codex screen restoration after
+switching between wide Mac and narrow iPhone layouts.
 
 1. On Mac, a local shell opens immediately. Choose **Vincular iPhone**.
 2. On iPhone, choose **Vincular Mac**, scan the QR (or paste the invitation), and confirm the displayed server. Compare the code on both screens, then approve on the Mac with local authentication.
@@ -163,6 +174,9 @@ On Mac, rename a session or use its automatic terminal title, then organize sess
 into named groups with a symbol and color. A manual name takes precedence over OSC
 0/2 titles; OSC 7 supplies directory context when the shell announces it. iPhone
 shows the same authorized names and groups. Group editing is currently Mac-only.
+Choose a flat system symbol or a single emoji using the macOS character picker.
+Groups remain saved and visible even after their last session closes, including
+after restarting AFK; their shell processes are not restored.
 
 Hide keeps a session running and can be undone. Hidden state is local to each device.
 Close and remove waits for the shell and foreground process group to exit, then

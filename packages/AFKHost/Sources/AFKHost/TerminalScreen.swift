@@ -94,7 +94,7 @@ final class TerminalScreen: @preconcurrency TerminalDelegate {
         let cursor = terminal.getCursorLocation()
         var viewport = TerminalViewport(size: TerminalSize(columns: terminal.cols, rows: terminal.rows),
             rows: (0..<terminal.rows).map { row in
-                terminal.getLine(row: row).map { render($0, source: terminal) } ?? TerminalRow(ansi: "", columns: terminal.cols)
+                terminal.getLine(row: row).map { render($0, source: terminal, columns: terminal.cols) } ?? TerminalRow(ansi: "", columns: terminal.cols)
             }, cursorX: min(terminal.cols - 1, cursor.x), cursorY: min(terminal.rows - 1, cursor.y), cursorVisible: cursorVisible,
             applicationCursor: terminal.applicationCursor, bracketedPaste: terminal.bracketedPasteMode,
             keyboardFlags: UInt32(terminal.keyboardEnhancementFlags.rawValue), historyCount: archive.count, sequence: sequence)
@@ -102,16 +102,18 @@ final class TerminalScreen: @preconcurrency TerminalDelegate {
         viewport.scrollDown = scrollEvent(button: 5)
         return viewport
     }
-    private func render(_ line: BufferLine, source: Terminal, trim: Bool = false) -> TerminalRow {
+    private func render(_ line: BufferLine, source: Terminal, trim: Bool = false, columns: Int? = nil) -> TerminalRow {
         var text = "", previous: Attribute?
-        for column in 0..<(trim ? line.getTrimmedLength() : line.count) {
+        // Alternate-screen lines can retain their old width after narrowing the terminal.
+        let count = min(columns ?? line.count, trim ? line.getTrimmedLength() : line.count)
+        for column in 0..<count {
             let cell = line[column]
             guard cell.width != 0 else { continue }
             if previous != cell.attribute { text += sgr(cell.attribute); previous = cell.attribute }
             let character = source.getCharacter(for: cell)
             text += character.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) ? " " : String(character)
         }
-        return TerminalRow(ansi: text + "\u{1b}[0m", columns: line.count)
+        return TerminalRow(ansi: text + "\u{1b}[0m", columns: columns ?? line.count)
     }
     private func sgr(_ attribute: Attribute) -> String {
         var codes = ["0"]
