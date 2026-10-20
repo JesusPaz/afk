@@ -7,7 +7,6 @@ import AFKCore
 struct AFKiOSApp: App {
     @StateObject private var model = RemoteModel()
     @Environment(\.scenePhase) private var phase
-    @State private var needsResume = false
     var body: some Scene {
         WindowGroup {
             PhoneHome(model: model).task { model.restore() }
@@ -15,8 +14,8 @@ struct AFKiOSApp: App {
                     if phase != .active { Color(.systemBackground).ignoresSafeArea().overlay(Image(systemName: "lock.fill").font(.largeTitle)) }
                 }
                 .onChange(of: phase) { _, next in
-                    if next == .background { needsResume = true; model.suspend() }
-                    else if next == .active && needsResume { needsResume = false; if model.linked { model.reconnect() } }
+                    if next == .background { model.suspend() }
+                    else if next == .active { model.activate() }
                 }
         }
     }

@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: L10n.text("Detener AFK")); alert.addButton(withTitle: L10n.text("Cancelar"))
         guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
         waitingForTermination = true
-        host.relay.disconnect()
+        host.disconnect()
         host.sessions.forEach { $0.terminate() }
         Task { @MainActor in
             if !(await waitForExit(host, seconds: 2)) {
@@ -351,6 +351,12 @@ struct MacWorkspace: View {
             else if selected == nil { selected = profileSessions.first(where: { !$0.isHidden && $0.running })?.id }
         }
         .task { await host.restoreConnection(server: server) }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            host.checkConnection(force: true)
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+            host.checkConnection(force: true)
+        }
         .onChange(of: host.sessions.map(\.id)) { _, next in
             if let selected, !next.contains(selected) { self.selected = nil }
         }

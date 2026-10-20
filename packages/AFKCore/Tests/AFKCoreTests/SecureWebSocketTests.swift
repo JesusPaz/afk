@@ -3,6 +3,7 @@ import NIOCore
 import NIOPosix
 import NIOSSL
 import CryptoKit
+import LocalAuthentication
 @testable import AFKCore
 
 @MainActor final class SecureWebSocketTests: XCTestCase {
@@ -21,9 +22,18 @@ import CryptoKit
         XCTAssertFalse(relay.diagnostic?.contains("private-domain") == true)
         relay.connectionFailed(URLError(.timedOut))
         XCTAssertEqual(relay.failure, L10n.text("La conexión agotó el tiempo de espera. Comprueba que el Mac esté despierto y conectado."))
+        XCTAssertTrue(relay.retryable)
+        relay.connectionFailed(LAError(.userCancel))
+        XCTAssertFalse(relay.retryable)
+        relay.connectionFailed(PeerProtocolGate.Failure.incompatibleProtocol)
+        XCTAssertFalse(relay.retryable)
         relay.connectionFailed(SecureError.unauthorized)
         XCTAssertEqual(relay.failure, SecureError.unauthorized.localizedDescription)
+        XCTAssertFalse(relay.retryable)
+        relay.connectionFailed(SecureError.disconnected)
+        XCTAssertTrue(relay.retryable)
         relay.disconnect()
+        XCTAssertFalse(relay.retryable)
         XCTAssertNil(relay.failure)
         XCTAssertEqual(relay.status, L10n.text("Sin conexión"))
     }

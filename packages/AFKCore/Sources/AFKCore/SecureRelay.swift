@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import LocalAuthentication
 import OSLog
+import NIOSSL
 
 private struct ControlOffer: Decodable { let type: String; let id: String; let clientID: String }
 private struct SecureHostConnection: Codable { let id: String; let token: String }
@@ -18,6 +19,9 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
     private let api = RelayClient()
     private let controlSession = secureURLSession()
     private var control: URLSessionWebSocketTask?
+    public var isConnecting: Bool { control != nil && !connected }
+    private var probeDeadline: TimeInterval?
+    private var nextProbe: TimeInterval = 0
     private var receiver: Task<Void, Never>?
     private var channels: [String: SecureTransport] = [:]
     private var authorized: Set<String> = []
@@ -39,7 +43,7 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
         var parts = URLComponents(string: origin + "/v2/control")!; parts.scheme = url.scheme == "https" ? "wss" : "ws"
         var request = URLRequest(url: parts.url!); request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = controlSession.webSocketTask(with: request); socket.maximumMessageSize = 2048
-        control = socket; socket.resume(); status = L10n.text("Conectando…")
+        control = socket; probeDeadline = ProcessInfo.processInfo.systemUptime + 15; socket.resume(); status = L10n.text("Conectando…")
         let current = generation
         receiver = Task { [weak self] in
             do {
@@ -52,7 +56,7 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
                     }
                     guard let self, self.generation == current else { return }
                     let offer = try JSONDecoder().decode(ControlOffer.self, from: data)
-                    if offer.type == "ready" { self.connected = true; self.status = L10n.text("Conectado") }
+                    if offer.type == "ready" { self.probeDeadline = nil; self.nextProbe = 0; self.connected = true; self.status = L10n.text("Conectado") }
                     else if offer.type == "open" { self.open(offer, generation: current) }
                     else { throw SecureError.protocolViolation }
                 }
@@ -62,6 +66,22 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
             }
         }
         return h
+    }
+    public func checkConnection(now: TimeInterval = ProcessInfo.processInfo.systemUptime, force: Bool = false) {
+        guard let socket = control else { return }
+        if let deadline = probeDeadline {
+            if now >= deadline { disconnect() }
+            return
+        }
+        guard connected, force || now >= nextProbe else { return }
+        nextProbe = now + 30; probeDeadline = now + 10
+        let current = generation
+        socket.sendPing { [weak self] error in
+            Task { @MainActor in
+                guard let self, self.generation == current else { return }
+                if error != nil { self.disconnect() } else { self.probeDeadline = nil }
+            }
+        }
     }
     public func restoreTrust(_ url: URL, id: String, token: String) throws {
         guard !connected else { return }
@@ -218,6 +238,7 @@ private struct SecureHostConnection: Codable { let id: String; let token: String
         for id in authorized where m.clientID == nil || m.clientID == id { channels[id]?.send(p) }
     }
     public func disconnect() {
+        probeDeadline = nil; nextProbe = 0
         invitationTimeout?.cancel(); invitationTimeout = nil
         candidate = nil; pendingWelcome = nil; onPairingEnded?()
         try? trust?.cancelInvitation()
@@ -244,6 +265,11 @@ public struct SecurePhoneConnection: Codable {
     private var transport: SecureTransport?
     @Published public private(set) var comparisonCode: String?
     private var authorized = false
+    public var isConnected: Bool { authorized }
+    public var isConnecting: Bool { transport != nil && !authorized }
+    public private(set) var retryable = false
+    private var probeDeadline: TimeInterval?
+    private var nextProbe: TimeInterval = 0
     private var generation = UUID()
     private var timeout: Task<Void, Never>?
     private let api = RelayClient()
@@ -357,11 +383,16 @@ public struct SecurePhoneConnection: Codable {
                     self.onMessage?(Message("welcome")); self.onMessage?(Message("hostOnline"))
                 } else {
                     guard packet.type == "message", let m = packet.message else { throw SecureError.protocolViolation }
+                    self.probeDeadline = nil
                     self.onMessage?(m)
                 }
             } catch { self.connectionFailed(error) }
         }
         transport.onClose = { [weak self, weak transport] in guard let self, self.transport === transport else { return }; self.connectionFailed(SecureError.disconnected) }
+        transport.onError = { [weak self, weak transport] error in
+            guard let self, self.transport === transport else { return }
+            self.connectionFailed(error)
+        }
         timeout = Task { [weak self, weak transport] in
             try? await Task.sleep(for: .seconds(60)); guard !Task.isCancelled, let self, self.transport === transport else { return }; self.connectionFailed(URLError(.timedOut))
         }
@@ -372,6 +403,17 @@ public struct SecurePhoneConnection: Codable {
         }
     }
     public func send(_ m: Message) { guard authorized else { return }; var p = SecurePacket(type: "message"); p.message = m; transport?.send(p) }
+    public func checkConnection(now: TimeInterval = ProcessInfo.processInfo.systemUptime, force: Bool = false) {
+        guard authorized else { return }
+        if let deadline = probeDeadline {
+            if now >= deadline { connectionFailed(URLError(.timedOut)) }
+            return
+        }
+        guard force || now >= nextProbe else { return }
+        nextProbe = now + 30; probeDeadline = now + 10
+        // Existing hosts answer list over the authenticated device channel.
+        send(Message("list"))
+    }
     func connectionFailed(_ error: Error) {
         connectionError = error
         let message: String
@@ -397,10 +439,14 @@ public struct SecurePhoneConnection: Codable {
         self.diagnostic = diagnostic
         Logger(subsystem: "app.afk", category: "connection").error("\(diagnostic, privacy: .public)")
         disconnect(failure: message)
+        if let secure = error as? SecureError { retryable = secure == .disconnected }
+        else if let tls = error as? NIOSSLError { retryable = tls == .uncleanShutdown }
+        else { retryable = !(error is LAError) && !(error is PeerProtocolGate.Failure) && (error as NSError).domain != NSOSStatusErrorDomain }
     }
     public func disconnect() { disconnect(failure: nil) }
     private func disconnect(failure: String?) {
         self.failure = failure
+        retryable = false; probeDeadline = nil; nextProbe = 0
         signingContext?.invalidate(); signingContext = nil
         generation = UUID(); comparisonCode = nil; let closing = transport; transport = nil; closing?.close(); timeout?.cancel(); timeout = nil; authorized = false
         status = failure ?? L10n.text("Sin conexión"); onDisconnect?()
