@@ -87,9 +87,10 @@ private final class SecureRecords: ChannelInboundHandler, @unchecked Sendable {
     private var queuedBytes = 0
     let onPacket: (SecurePacket, @escaping () -> Void) -> Void
     let onClose: () -> Void
+    let onError: (Error) -> Void
     private var timeout: Scheduled<Void>?
-    init(onReady: @escaping (Data) -> Void, onPacket: @escaping (SecurePacket, @escaping () -> Void) -> Void, onClose: @escaping () -> Void) {
-        self.onReady = onReady; self.onPacket = onPacket; self.onClose = onClose
+    init(onReady: @escaping (Data) -> Void, onPacket: @escaping (SecurePacket, @escaping () -> Void) -> Void, onClose: @escaping () -> Void, onError: @escaping (Error) -> Void) {
+        self.onReady = onReady; self.onPacket = onPacket; self.onClose = onClose; self.onError = onError
     }
     func handlerAdded(context: ChannelHandlerContext) {
         timeout = context.eventLoop.scheduleTask(in: .seconds(60)) { context.close(promise: nil) }
@@ -121,7 +122,7 @@ private final class SecureRecords: ChannelInboundHandler, @unchecked Sendable {
         buffer.discardReadBytes()
     }
     func channelInactive(context: ChannelHandlerContext) { timeout?.cancel(); onClose(); context.fireChannelInactive() }
-    func errorCaught(context: ChannelHandlerContext, error: Error) { context.close(promise: nil) }
+    func errorCaught(context: ChannelHandlerContext, error: Error) { onError(error); context.close(promise: nil) }
 }
 
 @MainActor final class SecureTransport {
@@ -135,6 +136,7 @@ private final class SecureRecords: ChannelInboundHandler, @unchecked Sendable {
     var onReady: ((Data) -> Void)?
     var onPacket: ((SecurePacket) -> Void)?
     var onClose: (() -> Void)?
+    var onError: ((Error) -> Void)?
     func connect(base: URL, path: String, token: String, identity: DeviceIdentity, server: Bool, authenticationContext: LAContext? = nil,
                  accepts: @escaping (Data) -> Bool) async throws {
         close(); let current = UUID(); generation = current
@@ -149,6 +151,12 @@ private final class SecureRecords: ChannelInboundHandler, @unchecked Sendable {
             } }
         }, onClose: { [weak self] in
             DispatchQueue.main.async { MainActor.assumeIsolated { guard let self, self.generation == current else { return }; self.close(); self.onClose?() } }
+        }, onError: { [weak self] error in
+            DispatchQueue.main.async { MainActor.assumeIsolated {
+                guard let self, self.generation == current else { return }
+                self.close()
+                if let onError = self.onError { onError(error) } else { self.onClose?() }
+            } }
         })
         var outerConfig = TLSConfiguration.makeClientConfiguration()
         outerConfig.minimumTLSVersion = .tlsv13

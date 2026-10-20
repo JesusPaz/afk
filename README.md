@@ -105,6 +105,17 @@ Changing enrolled phone biometrics requires pairing again. Secure Enclave is req
 for new identities; simulator/software fallback is not enabled in the app.
 See [security boundaries](docs/security.md) and [protocol](docs/e2ee.md).
 
+## Connection recovery
+
+The Mac checks its relay connection when returning to the foreground or waking,
+and periodically while running. A linked iPhone checks the authenticated path to
+the Mac when opened and while active. Failed connections retry with increasing
+waits capped at 30 seconds; health checks run every 30 seconds with a 10-second
+response deadline. The phone suspends connections in the background and reconnects
+on return. Manual Mac remote-access pause remains in effect until explicitly resumed.
+Authentication cancellation or identity/protocol rejection requires user action;
+recovery never replays uncertain input or automatically reclaims typing control.
+
 ## Saved terminal history
 
 Mac sessions now record all output and ordered size changes under
