@@ -188,6 +188,18 @@ import Security
         let firstPage = try XCTUnwrap(pages.last)
         XCTAssertLessThanOrEqual(firstPage.historyRows?.count ?? 0, 64)
         XCTAssertEqual(firstPage.historyBefore, view.historyCount)
+        // Denied writes must not discard a still-authorized read-only viewport.
+        host.setAccess(client: saved.credentials.clientID, session: session.id, level: .readOnly)
+        received = []
+        phone.send(Message("claim", sessionID: session.id))
+        try await until { received.contains { $0.type == "error" } }
+        let snapshotCount = snapshots.count
+        var continuingInput = Message("input", sessionID: session.id)
+        continuingInput.epoch = session.lease.epoch; continuingInput.sequence = 2
+        continuingInput.data = Data("printf 'AFK_AFTER_DENIAL_%s\\n' OK\n".utf8).base64EncodedString()
+        second.send(continuingInput)
+        try await until { snapshots.suffix(from: snapshotCount).contains { $0.rows.contains { $0.ansi.contains("AFK_AFTER_DENIAL_OK") } } }
+        XCTAssertTrue(snapshots.suffix(from: snapshotCount).contains { $0.rows.contains { $0.ansi.contains("AFK_AFTER_DENIAL") } })
         // Removing read access immediately stops future output and further history pages.
         received = []
         host.setAccess(client: saved.credentials.clientID, session: session.id, level: .none)
@@ -201,7 +213,7 @@ import Security
         try await until { received.contains { $0.type == "error" } }
         XCTAssertFalse(received.contains { $0.type == "historyPage" })
         var afterRemoval = Message("input", sessionID: session.id)
-        afterRemoval.epoch = session.lease.epoch; afterRemoval.sequence = 2
+        afterRemoval.epoch = session.lease.epoch; afterRemoval.sequence = 3
         afterRemoval.data = Data("printf POST_REMOVAL_MARKER\n".utf8).base64EncodedString()
         second.send(afterRemoval)
         try await until { secondMessages.contains { $0.data.flatMap { Data(base64Encoded: $0) }.map { String(decoding: $0, as: UTF8.self).contains("POST_REMOVAL_MARKER") } ?? false } }

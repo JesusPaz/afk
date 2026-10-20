@@ -178,6 +178,25 @@ Choose a flat system symbol or a single emoji using the macOS character picker.
 Groups remain saved and visible even after their last session closes, including
 after restarting AFK; their shell processes are not restored.
 
+On Mac, use the profile selector above the sidebar to switch between **Personal**,
+**Work**, and custom profiles created with **+ → New profile…**.
+Each profile shows its own groups, ungrouped sessions, hidden sessions and ended
+sessions. Existing organization starts in Personal. New groups and sessions belong
+to the selected profile. Use **Move to profile** in a group or session's context
+menu; moving a group includes its sessions, while moving a single session removes
+it from its old group. Switching profiles clears the selected terminal and keeps
+all shells and renderers running without changing typing control.
+Drag sessions onto a group header or another session in that group to move them.
+Drop onto **Ungrouped** to remove their group; this destination stays visible even
+when empty. Profile names, group assignments and the selected profile survive app
+relaunch; shells do not.
+Restoring a terminal recording yields between bounded batches and shows progress;
+input remains disabled until restoration completes. An unavailable history archive
+shows a notice while the remote live screen continues updating.
+
+Profiles organize the Mac workspace locally. iPhone access still follows the
+existing session permissions, and Saved history remains a shared archive.
+
 Hide keeps a session running and can be undone. Hidden state is local to each device.
 Close and remove waits for the shell and foreground process group to exit, then
 removes the row while preserving saved history. Detached processes and external

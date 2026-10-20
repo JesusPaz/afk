@@ -43,6 +43,7 @@ public final class TerminalFeed: ObservableObject {
     public var onApplicationScroll: ((Int) -> Bool)?
     public var onCancelApplicationScroll: (() -> Void)?
     public func present(_ events: [TerminalEvent], sequence: UInt64, start: UInt64, following: Bool) {
+        cancelReplays()
         presentation = events; presentationStart = start; followingPresentation = following
         self.sequence = sequence; size = events.compactMap(\.size).last ?? .initial
         for listener in listeners.values { listener(events, true) }
@@ -53,6 +54,8 @@ public final class TerminalFeed: ObservableObject {
     }
     private var replay = TerminalReplay()
     private var listeners: [UUID: ([TerminalEvent], Bool) -> Void] = [:]
+    private var replayTasks: [UUID: Task<Void, Never>] = [:]
+    @Published public private(set) var isRestoringHistory = false
     @Published public private(set) var size = TerminalSize.initial
     public var sequence: UInt64 = 0
     public var snapshot: [TerminalEvent]? { replay.snapshot }
@@ -67,16 +70,17 @@ public final class TerminalFeed: ObservableObject {
     private func append(_ event: TerminalEvent) {
         if let size = event.size { self.size = size }
         if historyError == nil {
-            do { try history?.append(event) } catch { historyError = error.localizedDescription }
+            do { try history?.append(event) } catch { historyError = error.localizedDescription; cancelReplays() }
         }
         replay.append(event)
-        for listener in listeners.values { listener([event], false) }
+        for (id, listener) in listeners where replayTasks[id] == nil { listener([event], false) }
     }
     @discardableResult public func reset(_ events: [TerminalEvent], sequence: UInt64) -> Bool {
         guard events.allSatisfy(\.isValid) else { return false }
         var replay = TerminalReplay()
         for event in events { replay.append(event) }
         guard replay.snapshot != nil else { return false }
+        cancelReplays()
         self.sequence = sequence; self.replay = replay
         size = events.compactMap(\.size).last ?? .initial
         for listener in listeners.values { listener(events, true) }
@@ -89,10 +93,35 @@ public final class TerminalFeed: ObservableObject {
             callback([], true)
             do {
                 let reader = try TerminalHistory.Reader(history.entry)
-                while reader.offset < reader.length { callback(try reader.next(), false) }
+                if reader.offset < reader.length {
+                    isRestoringHistory = true
+                    replayTasks[id] = Task { [weak self] in
+                        do {
+                            while !Task.isCancelled {
+                                guard let self, self.listeners[id] != nil else { return }
+                                callback(try reader.next(maxBytes: 16 * 1024), false)
+                                try reader.refreshLength()
+                                if reader.offset >= reader.length { break }
+                                await Task.yield()
+                            }
+                        } catch { self?.historyError = error.localizedDescription }
+                        if let self {
+                            self.replayTasks.removeValue(forKey: id)
+                            self.isRestoringHistory = !self.replayTasks.isEmpty
+                        }
+                    }
+                }
             } catch { historyError = error.localizedDescription }
         } else if let snapshot { callback(snapshot, true) }
         return id
     }
-    public func remove(_ id: UUID) { listeners.removeValue(forKey: id) }
+    public func remove(_ id: UUID) {
+        listeners.removeValue(forKey: id)
+        replayTasks.removeValue(forKey: id)?.cancel()
+        isRestoringHistory = !replayTasks.isEmpty
+    }
+    private func cancelReplays() {
+        replayTasks.values.forEach { $0.cancel() }
+        replayTasks.removeAll(); isRestoringHistory = false
+    }
 }

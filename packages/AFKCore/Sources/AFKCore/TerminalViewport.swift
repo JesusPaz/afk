@@ -20,6 +20,7 @@ public struct TerminalViewport: Codable, Equatable {
     public var sequence: UInt64
     public var scrollUp: Data?
     public var scrollDown: Data?
+    public var historyUnavailable: Bool?
     public init(size: TerminalSize, rows: [TerminalRow], cursorX: Int, cursorY: Int,
                 cursorVisible: Bool, applicationCursor: Bool, bracketedPaste: Bool,
                 keyboardFlags: UInt32, historyCount: UInt64, sequence: UInt64) {

@@ -56,6 +56,7 @@ final class PTYProcess {
         pending.append(data); flush()
         return fd >= 0
     }
+    func canAccept(_ count: Int) -> Bool { fd >= 0 && count <= 64 * 1024 - pending.count }
     private func flush() {
         guard fd >= 0 else { return }
         while !pending.isEmpty {

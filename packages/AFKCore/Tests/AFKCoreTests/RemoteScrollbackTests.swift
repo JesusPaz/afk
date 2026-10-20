@@ -103,6 +103,24 @@ import XCTest
             if end <= 64 { break }
         }
     }
+    func testFailedPageReturnsToLiveAndRejectsLatePage() throws {
+        let feed = TerminalFeed()
+        let state = RemoteScrollback(feed: feed)
+        state.update(TerminalViewport(size: .initial, rows: Array(repeating: TerminalRow(ansi: "live", columns: 80), count: 24),
+            cursorX: 0, cursorY: 0, cursorVisible: true, applicationCursor: false, bracketedPaste: false,
+            keyboardFlags: 0, historyCount: 64, sequence: 1))
+        let request = try XCTUnwrap(state.request(older: true))
+        XCTAssertFalse(state.failRequest(nil))
+        XCTAssertFalse(state.failRequest("stale"))
+        XCTAssertTrue(state.waitingForHistory)
+        XCTAssertTrue(state.failRequest(request.requestID))
+        XCTAssertFalse(state.browsing)
+        XCTAssertTrue(feed.followingPresentation)
+        var page = Message("historyPage"); page.requestID = request.requestID
+        page.historyStart = 0; page.historyBefore = 64
+        page.historyRows = Array(repeating: TerminalRow(ansi: "old", columns: 80), count: 64)
+        XCTAssertFalse(state.accept(page))
+    }
     func testDiskIndexReadsBothDirectionsWithoutLoadingFullHistory() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

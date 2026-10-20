@@ -4,6 +4,30 @@ import AFKCore
 @testable import AFKHost
 
 @MainActor final class RemoteAccessTests: XCTestCase {
+    func testLocalPasteLargerThanPacketLimitArrivesWhole() async throws {
+        let session = HostSession()
+        var output = ""
+        let observation = session.feed.observe { events, _ in
+            for event in events { if let bytes = event.data { output += String(decoding: bytes, as: UTF8.self) } }
+        }
+        defer { session.feed.remove(observation); session.forceClose() }
+        session.start()
+        // A raw reader isolates AFK's input delivery from interactive shell line limits.
+        let reader = "stty -icanon -echo; /usr/bin/perl -e '$|=1; print \"AFK_READY\\n\"; $n=0; while ($n<9000) { $r=sysread(STDIN,$b,9000-$n); last unless $r; $n+=$r; } print \"AFK_PASTE_$n\\n\"'; stty sane\n"
+        session.localInput(Data(reader.utf8))
+        for _ in 0..<100 where !output.contains("AFK_READY\r\n") && !output.contains("AFK_READY\n") { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(output.contains("AFK_READY\r\n") || output.contains("AFK_READY\n"))
+        session.localInput(Data(repeating: 120, count: 9000))
+        for _ in 0..<100 where !output.contains("AFK_PASTE_9000") { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(output.contains("AFK_PASTE_9000"))
+        XCTAssertNil(session.inputError)
+        session.localInput(Data(repeating: 120, count: 65537))
+        XCTAssertNotNil(session.inputError)
+        XCTAssertTrue(session.running, "An oversized paste must not kill the shell")
+        session.localInput(Data("printf 'AFK_AFTER_%s\\n' REJECTION\n".utf8))
+        for _ in 0..<100 where !output.contains("AFK_AFTER_REJECTION") { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(output.contains("AFK_AFTER_REJECTION"), "Rejected input must not leave a partial paste")
+    }
     func testTrustedAccessCoversFutureSessionsAndIsRemovedImmediately() {
         let access = RemoteAccess()
         access.setTrustedClients(["trusted"])

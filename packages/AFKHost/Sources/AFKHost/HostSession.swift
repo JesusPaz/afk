@@ -5,6 +5,18 @@ import Darwin
 import SwiftTerm
 import AFKCore
 
+public struct WorkspaceProfile: RawRepresentable, Codable, Hashable {
+    public let rawValue: String
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public static let personal = Self(rawValue: "personal")
+    public static let work = Self(rawValue: "work")
+    public init(from decoder: Decoder) throws { rawValue = try decoder.singleValueContainer().decode(String.self) }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
 @MainActor
 public final class HostSession: ObservableObject, Identifiable {
     public let id: String
@@ -12,8 +24,10 @@ public final class HostSession: ObservableObject, Identifiable {
     @Published public private(set) var reportedTitle: String?
     @Published public private(set) var context: String?
     @Published public internal(set) var groupID: String?
+    @Published public internal(set) var profile: WorkspaceProfile = .personal
     @Published public internal(set) var isHidden = false
     @Published public private(set) var closing = false
+    @Published public private(set) var inputError: String?
     public var name: String { userLabel ?? reportedTitle ?? context ?? "Terminal · " + id.prefix(4).uppercased() }
     private var metadataTask: Task<Void, Never>?
     public let feed: TerminalFeed
@@ -50,7 +64,7 @@ public final class HostSession: ObservableObject, Identifiable {
         if name != "Shell" && !name.hasPrefix("Terminal ") { userLabel = SessionMetadata.clean(name) }
         let directory = history?.entry.directory ?? FileManager.default.temporaryDirectory.appendingPathComponent("AFK-screen-" + UUID().uuidString)
         temporaryScreenDirectory = history == nil ? directory : nil
-        screen = try? TerminalScreen(directory: directory)
+        screen = TerminalScreen(directory: directory)
         _ = feed.observe { [weak screen] events, _ in
             for event in events {
                 if let data = event.data { screen?.append(data) }
@@ -129,7 +143,21 @@ public final class HostSession: ObservableObject, Identifiable {
         onEvent?(message)
     }
     public func localInput(_ bytes: Data) {
-        localSequence += 1; input(bytes, client: "local", epoch: lease.epoch, sequence: localSequence)
+        guard running, !closing, lease.owner == "local" else { return }
+        // Reject before sending any part when this paste exceeds the PTY queue.
+        guard process.canAccept(bytes.count) else {
+            inputError = L10n.text("La entrada es demasiado grande. No se envió; pega un bloque más pequeño.")
+            return
+        }
+        inputError = nil
+        for start in stride(from: 0, to: bytes.count, by: 8192) {
+            localSequence += 1
+            guard input(bytes.subdata(in: start..<min(start + 8192, bytes.count)),
+                        client: "local", epoch: lease.epoch, sequence: localSequence) else {
+                inputError = L10n.text("No se pudo enviar toda la entrada. Revisa la terminal antes de continuar.")
+                return
+            }
+        }
     }
     public func terminate() {
         guard running, !closing else { return }

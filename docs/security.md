@@ -84,6 +84,12 @@ verify the server origin and compare the eight-digit code on both devices. The r
 timing and ciphertext lengths, and can deny service; it cannot be made availability-
 trusted by encryption. Registration abuse is rate/budget limited, not eliminated.
 The single-instance limiter sees the TCP peer, which may be a shared reverse proxy.
+Transport enrollment allows up to 64 non-revoked registrations per host in a rolling
+24-hour window, serialized by a database host-row lock. Older attempts no longer
+consume that budget; revoked rows remain to reject reuse of their credentials.
+This budget does not confer device trust or replace local pairing approval.
+Native HTTP registration and revocation responses are bounded to 64 KiB, including
+responses without a declared content length.
 
 Controlling even one shared shell runs commands as the Mac user and can access
 that user's files and credentials, including other processes. Per-session permissions

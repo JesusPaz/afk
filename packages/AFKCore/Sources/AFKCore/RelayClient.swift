@@ -38,15 +38,31 @@ public final class RelayClient: ObservableObject {
     private var sender: Task<Void, Never>?
     private var outgoing: [Message] = []
     private var generation = UUID()
-    private let session = secureURLSession()
+    private let session: URLSession
 
-    public init() {}
+    public init() { session = secureURLSession() }
+    init(session: URLSession) { self.session = session }
+    private func response(to request: URLRequest) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: request)
+        guard response.expectedContentLength <= 64 * 1024 else {
+            bytes.task.cancel()
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+        var data = Data()
+        do {
+            for try await byte in bytes {
+                guard data.count < 64 * 1024 else { throw URLError(.dataLengthExceedsMaximum) }
+                data.append(byte)
+            }
+        } catch { bytes.task.cancel(); throw error }
+        return (data, response)
+    }
     public func request<Response: Decodable>(_ base: URL, path: String, method: String = "POST", token: String? = nil, body: [String: String]? = nil) async throws -> Response {
         var request = URLRequest(url: base.appendingPathComponent(path)); request.httpMethod = method; request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body { request.httpBody = try JSONEncoder().encode(body) }
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await response(to: request)
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
             let message = (try? JSONDecoder().decode([String: String].self, from: data))?["error"] ?? "unknown"
             throw AFKError.message(L10n.serverError(message))
@@ -56,7 +72,7 @@ public final class RelayClient: ObservableObject {
     public func revoke(_ base: URL, token: String, clientID: String, version: String = "v1") async throws {
         var r = URLRequest(url: base.appendingPathComponent("\(version)/clients/\(clientID)")); r.httpMethod = "DELETE"; r.timeoutInterval = 15
         r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (_, response) = try await session.data(for: r)
+        let (_, response) = try await response(to: r)
         guard (response as? HTTPURLResponse)?.statusCode == 204 else { throw AFKError.message(L10n.text("No se pudo revocar el acceso.")) }
     }
     public func connect(_ base: URL, token: String) {

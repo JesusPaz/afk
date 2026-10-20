@@ -2,6 +2,36 @@ import XCTest
 import AFKCore
 
 @MainActor final class RemoteAccessModelTests: XCTestCase {
+    func testUnavailableHistoryKeepsReceivingLiveFrames() throws {
+        let model = RemoteModel()
+        let id = "unavailable-history"
+        var list = Message("sessions")
+        list.sessions = [SessionInfo(id: id, name: "Shell", running: true, owner: "local", epoch: 1)]
+        model.relay.onMessage?(list); model.attach(id)
+        let attachment = model.viewportID
+        var rendered = ""
+        let observation = model.feed.observe { events, _ in
+            rendered = events.compactMap(\.data).map { String(decoding: $0, as: UTF8.self) }.joined()
+        }
+        defer { model.feed.remove(observation) }
+        for sequence in UInt64(100)...101 {
+            var frame = try viewportMessage(model, session: id, count: 0)
+            var view = try JSONDecoder().decode(TerminalViewport.self, from: XCTUnwrap(Data(base64Encoded: frame.data!)))
+            view.historyUnavailable = true
+            view.sequence = sequence
+            view.rows[0].ansi = "live-\(sequence)"
+            let bytes = try JSONEncoder().encode(view)
+            frame.sequence = sequence; frame.data = bytes.base64EncodedString()
+            frame.historyOffset = UInt64(bytes.count); frame.historyLength = UInt64(bytes.count)
+            model.relay.onMessage?(frame)
+            XCTAssertTrue(model.ready)
+            XCTAssertEqual(model.viewportID, attachment)
+            XCTAssertNotNil(model.sessionNotice)
+            XCTAssertTrue(rendered.contains("live-\(sequence)"))
+        }
+        model.suspend()
+    }
+
     func testReconnectWaitsForAuthorizedSessionListBeforeReattaching() throws {
         let model = RemoteModel()
         let session = SessionInfo(id: "reconnect", name: "Shell", running: true, owner: "local", epoch: 1)

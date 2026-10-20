@@ -14,15 +14,23 @@ public final class HostController: ObservableObject {
     public let relay = SecureHostRelay()
     @Published public private(set) var sessions: [HostSession] = []
     @Published public private(set) var groups: [SessionGroup] = []
+    @Published public private(set) var groupProfiles: [String: WorkspaceProfile] = [:]
+    @Published public private(set) var customProfiles: [String: String] = [:]
+    public var profiles: [WorkspaceProfile] {
+        [.personal, .work] + customProfiles.keys.sorted().map { WorkspaceProfile(rawValue: $0) }
+    }
     private struct Organization: Codable {
         var version = 1
         var groups: [SessionGroup] = []
         var sessions: [String: Metadata] = [:]
+        var groupProfiles: [String: WorkspaceProfile]?
+        var customProfiles: [String: String]?
     }
     private struct Metadata: Codable {
         var label: String?
         var groupID: String?
         var hidden: Bool
+        var profile: WorkspaceProfile?
     }
     private var organization = Organization()
     private var removalRequested: Set<String> = []
@@ -64,7 +72,8 @@ public final class HostController: ObservableObject {
         self.preferences = preferences
         if let data = preferences.data(forKey: "sessionOrganization"),
            let saved = try? JSONDecoder().decode(Organization.self, from: data), saved.version == 1 {
-            organization = saved; groups = saved.groups
+            organization = saved; groups = saved.groups; groupProfiles = saved.groupProfiles ?? [:]
+            customProfiles = saved.customProfiles ?? [:]
         }
         self.access = access ?? RemoteAccess(); history = AccessHistory(preferences: preferences)
         remoteAccessPaused = preferences.bool(forKey: "remoteAccessPaused")
@@ -87,18 +96,21 @@ public final class HostController: ObservableObject {
     }
     deinit { if let lockObserver { DistributedNotificationCenter.default().removeObserver(lockObserver) } }
     @discardableResult
-    public func create(name: String = "Shell", id: String = UUID().uuidString) -> HostSession? {
+    public func create(name: String = "Shell", id: String = UUID().uuidString, profile: WorkspaceProfile = .personal) -> HostSession? {
+        guard profiles.contains(profile) else { return nil }
         if let existing = sessions.first(where: { $0.id == id }) { return existing }
         guard sessions.filter({ $0.running }).count < 8 else { error = L10n.text("El POC permite hasta ocho sesiones."); return nil }
         let recording: TerminalHistory?
         do { recording = try historyDirectory.map { try TerminalHistory(root: $0, name: String(name.prefix(60))) } }
         catch { self.error = error.localizedDescription; return nil }
         let session = HostSession(id: id, name: String(name.prefix(60)), history: recording)
+        session.profile = profile
         session.onEvent = { [weak self] in self?.forward($0) }
         if let metadata = organization.sessions[id] {
             session.rename(metadata.label)
             session.groupID = groups.contains(where: { $0.id == metadata.groupID }) ? metadata.groupID : nil
             session.isHidden = metadata.hidden
+            session.profile = session.groupID.map { self.profile(forGroup: $0) } ?? metadata.profile ?? .personal
         }
         session.onState = { [weak self, weak session] in
             guard let self, let session else { return }
@@ -114,25 +126,62 @@ public final class HostController: ObservableObject {
             catch { self.error = error.localizedDescription }
         }
         organization.groups = groups
+        organization.groupProfiles = groupProfiles
+        organization.customProfiles = customProfiles
         organization.sessions = Dictionary(uniqueKeysWithValues: sessions.map {
-            ($0.id, Metadata(label: $0.userLabel, groupID: $0.groupID, hidden: $0.isHidden))
+            ($0.id, Metadata(label: $0.userLabel, groupID: $0.groupID, hidden: $0.isHidden, profile: $0.profile))
         })
         if let data = try? JSONEncoder().encode(organization) { preferences.set(data, forKey: "sessionOrganization") }
     }
     private func organizationChanged() { persistOrganization(); publishSessions() }
+    public func profileName(_ profile: WorkspaceProfile) -> String {
+        customProfiles[profile.rawValue] ?? L10n.text(profile == .work ? "Trabajo" : "Personal")
+    }
+    @discardableResult public func createProfile(name: String) -> WorkspaceProfile? {
+        guard let name = SessionMetadata.clean(name), customProfiles.count < 62,
+              !profiles.contains(where: { profileName($0).localizedCaseInsensitiveCompare(name) == .orderedSame }) else { return nil }
+        let profile = WorkspaceProfile(rawValue: UUID().uuidString)
+        customProfiles[profile.rawValue] = name
+        organizationChanged()
+        return profile
+    }
+    @discardableResult public func dropSessions(_ ids: [String], groupID: String?, profile: WorkspaceProfile) -> Bool {
+        guard !ids.isEmpty, profiles.contains(profile),
+              groupID == nil || groups.contains(where: { $0.id == groupID && self.profile(forGroup: $0.id) == profile }),
+              ids.allSatisfy({ id in sessions.contains { $0.id == id && $0.profile == profile && !$0.closing } }) else { return false }
+        for session in sessions where ids.contains(session.id) { session.groupID = groupID }
+        organizationChanged()
+        return true
+    }
     public func renameSession(id: String, label: String?) { sessions.first(where: { $0.id == id })?.rename(label) }
     public func setHidden(id: String, hidden: Bool) {
         sessions.first(where: { $0.id == id })?.isHidden = hidden; organizationChanged()
     }
     public func moveSession(id: String, groupID: String?) {
-        guard groupID == nil || groups.contains(where: { $0.id == groupID }) else { return }
-        sessions.first(where: { $0.id == id })?.groupID = groupID; organizationChanged()
+        guard groupID == nil || groups.contains(where: { $0.id == groupID }),
+              let session = sessions.first(where: { $0.id == id }) else { return }
+        session.groupID = groupID
+        if let groupID { session.profile = profile(forGroup: groupID) }
+        organizationChanged()
     }
-    @discardableResult public func createGroup(name: String, symbol: String = "folder", color: String = "blue", emoji: String? = nil) -> SessionGroup? {
-        guard let name = SessionMetadata.clean(name), groups.count < 64 else { return nil }
+    public func profile(forGroup id: String) -> WorkspaceProfile { groupProfiles[id] ?? .personal }
+    public func moveSession(id: String, profile: WorkspaceProfile) {
+        guard profiles.contains(profile), let session = sessions.first(where: { $0.id == id }) else { return }
+        session.profile = profile
+        if let groupID = session.groupID, self.profile(forGroup: groupID) != profile { session.groupID = nil }
+        organizationChanged()
+    }
+    public func moveGroup(id: String, profile: WorkspaceProfile) {
+        guard profiles.contains(profile), groups.contains(where: { $0.id == id }) else { return }
+        groupProfiles[id] = profile
+        for session in sessions where session.groupID == id { session.profile = profile }
+        organizationChanged()
+    }
+    @discardableResult public func createGroup(name: String, symbol: String = "folder", color: String = "blue", emoji: String? = nil, profile: WorkspaceProfile = .personal) -> SessionGroup? {
+        guard profiles.contains(profile), let name = SessionMetadata.clean(name), groups.count < 64 else { return nil }
         let group = SessionGroup(name: name, symbol: SessionGroup.symbols.contains(symbol) ? symbol : "folder",
                                  color: SessionGroup.colors.contains(color) ? color : "blue", emoji: emoji)
-        groups.append(group); organizationChanged(); return group
+        groups.append(group); groupProfiles[group.id] = profile; organizationChanged(); return group
     }
     public func updateGroup(_ group: SessionGroup) {
         guard let index = groups.firstIndex(where: { $0.id == group.id }), let name = SessionMetadata.clean(group.name) else { return }
@@ -143,24 +192,28 @@ public final class HostController: ObservableObject {
     public func deleteGroup(id: String) {
         if let index = groups.firstIndex(where: { $0.id == id }) { deletedGroupPositions = [id: index] }
         groups.removeAll { $0.id == id }
+        groupProfiles.removeValue(forKey: id)
         for session in sessions where session.groupID == id { session.groupID = nil }
         organizationChanged()
     }
-    public func restoreGroup(_ group: SessionGroup, sessionIDs: [String]) {
+    public func restoreGroup(_ group: SessionGroup, sessionIDs: [String], profile: WorkspaceProfile = .personal) {
         guard !groups.contains(where: { $0.id == group.id }), groups.count < 64 else { return }
         let index = min(groups.count, deletedGroupPositions.removeValue(forKey: group.id) ?? groups.count)
         groups.insert(group, at: index)
-        for session in sessions where session.groupID == nil && sessionIDs.contains(session.id) { session.groupID = group.id }
+        groupProfiles[group.id] = profile
+        for session in sessions where session.profile == profile && session.groupID == nil && sessionIDs.contains(session.id) { session.groupID = group.id }
         organizationChanged()
     }
     public func reorderGroup(id: String, offset: Int) {
         guard let index = groups.firstIndex(where: { $0.id == id }) else { return }
-        let destination = max(0, min(groups.count - 1, index + offset))
-        let group = groups.remove(at: index); groups.insert(group, at: destination); organizationChanged()
+        let peers = groups.indices.filter { profile(forGroup: groups[$0].id) == profile(forGroup: id) }
+        guard let position = peers.firstIndex(of: index) else { return }
+        let destination = peers[max(0, min(peers.count - 1, position + offset))]
+        groups.swapAt(index, destination); organizationChanged()
     }
     public func reorderSession(id: String, offset: Int) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
-        let peers = sessions.indices.filter { sessions[$0].groupID == sessions[index].groupID && sessions[$0].isHidden == sessions[index].isHidden }
+        let peers = sessions.indices.filter { sessions[$0].profile == sessions[index].profile && sessions[$0].groupID == sessions[index].groupID && sessions[$0].isHidden == sessions[index].isHidden }
         guard let position = peers.firstIndex(of: index) else { return }
         let destination = peers[max(0, min(peers.count - 1, position + offset))]
         sessions.swapAt(index, destination); organizationChanged()
@@ -361,7 +414,9 @@ public final class HostController: ObservableObject {
         }
     }
     private func deny(_ client: String, session: String? = nil) {
-        views.removeValue(forKey: client)
+        if let view = views[client], access.level(client: client, session: view.session) == .none {
+            views.removeValue(forKey: client)
+        }
         record(.denied, client: client, session: session)
         sendError("El Mac no ha autorizado esta operación.", client: client)
         publishSessions(to: client)
@@ -371,7 +426,7 @@ public final class HostController: ObservableObject {
     }
     private func sendViewport(client: String, session: HostSession) {
         do {
-            guard let screen = session.screen, screen.error == nil else { throw CocoaError(.fileReadUnknown) }
+            guard let screen = session.screen else { throw CocoaError(.fileReadUnknown) }
             let data = try JSONEncoder().encode(screen.snapshot(sequence: session.feed.sequence))
             guard data.count <= 8 * 1024 * 1024 else { throw CocoaError(.fileReadTooLarge) }
             views[client]?.data = data; views[client]?.offset = 0; views[client]?.sequence = session.feed.sequence
@@ -421,16 +476,21 @@ public final class HostController: ObservableObject {
             guard let view = views[client], view.session == session.id, view.id == m.viewportID,
                   let request = m.requestID, UUID(uuidString: request) != nil else { return }
             do {
-                guard let screen = session.screen, screen.error == nil else { throw CocoaError(.fileReadUnknown) }
+                guard let screen = session.screen, screen.error == nil, let archive = screen.archive else { throw CocoaError(.fileReadUnknown) }
                 let page: (start: UInt64, rows: [TerminalRow])
-                if let before = m.historyBefore { page = try screen.archive.page(before: before) }
-                else if let after = m.historyStart { page = try screen.archive.page(after: after) }
+                if let before = m.historyBefore { page = try archive.page(before: before) }
+                else if let after = m.historyStart { page = try archive.page(after: after) }
                 else { return }
                 var reply = Message("historyPage", sessionID: session.id)
                 reply.clientID = client; reply.viewportID = view.id; reply.requestID = request
                 reply.historyStart = page.start; reply.historyBefore = page.start + UInt64(page.rows.count); reply.historyRows = page.rows
                 relay.send(reply)
-            } catch { sendError("No se pudo leer el historial completo del Mac.", client: client, session: session.id) }
+            } catch {
+                var reply = Message("historyError", sessionID: session.id)
+                reply.clientID = client; reply.viewportID = view.id; reply.requestID = request
+                reply.message = "El historial no está disponible. La pantalla en vivo sigue conectada."
+                relay.send(reply)
+            }
         case "attach":
             views.removeValue(forKey: client)
             if let id = m.viewportID {
