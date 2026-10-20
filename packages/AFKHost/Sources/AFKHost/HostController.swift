@@ -58,6 +58,9 @@ public final class HostController: ObservableObject {
     private let historyDirectory: URL?
     private let preferences: UserDefaults
     private var restoredConnection = false
+    private var recoveryServer: String?
+    private var retryDelay: TimeInterval = 2
+    private var nextConnectionAttempt: TimeInterval = 0
     private var base: URL?
     private var secret: HostSecret?
     private var timer: Timer?
@@ -240,20 +243,24 @@ public final class HostController: ObservableObject {
         guard !remoteAccessPaused else { return }
         await connect(server: server)
     }
-    public func connect(server: String, credentials: HostSecret? = nil) async {
+    public func connect(server: String, credentials: HostSecret? = nil, automatic: Bool = false) async {
         guard !connecting else { return }
-        connecting = true
-        defer { connecting = false }
+        connecting = true; recoveryServer = server
+        defer {
+            connecting = false
+            nextConnectionAttempt = ProcessInfo.processInfo.systemUptime + retryDelay
+            retryDelay = min(30, retryDelay * 2)
+        }
         do {
             let url = try ServerAddress.parse(server)
-            let saved: HostSecret? = try credentials ?? SecretStore.read("host:\(url.absoluteString)")
+            let saved: HostSecret? = try credentials ?? (base == url ? secret : nil) ?? SecretStore.read("host:\(url.absoluteString)")
             let identity = try saved ?? HostSecret(token: SecretStore.randomToken())
             if credentials == nil && saved == nil { try SecretStore.write(identity, account: "host:\(url.absoluteString)") }
             if base != nil && (base != url || secret?.id != identity.id) { stopRemoteAccess() }
             let h = try await relay.connect(url, id: identity.id, token: identity.token, name: Host.current().localizedName ?? "Mac")
             remoteAccessPaused = false; preferences.set(false, forKey: "remoteAccessPaused")
             base = url; secret = identity; host = h; error = nil; restoreTrustedAccess()
-        } catch { self.error = error.localizedDescription }
+        } catch { if !automatic { self.error = error.localizedDescription } }
     }
     public func cancelPairing() {
         pairingGeneration = UUID(); pairingUnlock.invalidate(); pairing = nil
@@ -313,7 +320,8 @@ public final class HostController: ObservableObject {
         do { try relay.cancelInvitation() } catch { self.error = error.localizedDescription }
         record(.stopped)
     }
-    public func shutdown() { trustUnlock.invalidate(); accessRevision += 1; relay.disconnect(); sessions.forEach { $0.forceClose() }; timer?.invalidate() }
+    public func disconnect() { recoveryServer = nil; relay.disconnect() }
+    public func shutdown() { recoveryServer = nil; trustUnlock.invalidate(); accessRevision += 1; relay.disconnect(); sessions.forEach { $0.forceClose() }; timer?.invalidate() }
     public func stopRemoteAccess() { pause() }
     public func revokeAllDevices() {
         pause()
@@ -369,7 +377,20 @@ public final class HostController: ObservableObject {
         history.record(kind, client: client, session: session); objectWillChange.send()
     }
     private func releaseControl(_ client: String) { sessions.forEach { $0.release(client) } }
+    public func checkConnection(force: Bool = false) {
+        guard !remoteAccessPaused, let server = recoveryServer else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        relay.checkConnection(now: now, force: force)
+        if relay.connected { retryDelay = 2; nextConnectionAttempt = 0; return }
+        guard !connecting, !relay.isConnecting, force || now >= nextConnectionAttempt else { return }
+        nextConnectionAttempt = now + retryDelay
+        Task { [weak self] in
+            guard let self, !self.remoteAccessPaused, self.recoveryServer == server else { return }
+            await self.connect(server: server, automatic: true)
+        }
+    }
     func tick() {
+        checkConnection()
         do { try relay.expireInvitationIfNeeded() } catch { self.error = error.localizedDescription }
         let expired = access.expire()
         for (client, session) in expired { record(.expired, client: client, session: session) }

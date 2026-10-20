@@ -119,6 +119,11 @@ final class RemoteModel: ObservableObject {
     private var credentials: ClientCredentials?
     private var subscription: AnyCancellable?
     private var renewal: Timer?
+    private var recoveryTimer: Timer?
+    private var active = false
+    private var restored = false
+    private var retryDelay: TimeInterval = 2
+    private var nextConnectionAttempt: TimeInterval = 0
     @Published var canCreate = false
     var selectedInfo: SessionInfo? { sessions.first { $0.id == selected } }
     var terminalStatus: String {
@@ -154,6 +159,9 @@ final class RemoteModel: ObservableObject {
         }
         pairingSubscription = relay.$comparisonCode.sink { [weak self] in self?.comparisonCode = $0 }
         subscription = relay.$status.sink { [weak self] in self?.status = $0 }
+        recoveryTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkConnection() }
+        }
         renewal = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.canClaim, self.owner == self.credentials?.clientID else { return }
@@ -162,6 +170,7 @@ final class RemoteModel: ObservableObject {
         }
     }
     func restore() {
+        guard !restored else { return }; restored = true; active = true
         do {
             if let saved = try relay.restore() {
                 credentials = saved.credentials; loadHiddenSessions(hostID: saved.credentials.host.id); hostName = saved.credentials.host.name; linked = true; reconnect()
@@ -185,8 +194,25 @@ final class RemoteModel: ObservableObject {
             hostName = saved.credentials.host.name; linked = true; error = nil
         } catch { self.error = error.localizedDescription }
     }
-    func reconnect() {
+    func activate() {
+        let resumed = !active; active = true
+        guard linked else { return }
+        if resumed && !relay.isConnected && !relay.isConnecting { reconnect() }
+        else { checkConnection(force: true) }
+    }
+    func checkConnection(force: Bool = false) {
+        guard active, linked, !pairing else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        relay.checkConnection(now: now, force: force)
+        if relay.isConnected { retryDelay = 2; nextConnectionAttempt = 0; return }
+        guard relay.retryable, !relay.isConnecting, now >= nextConnectionAttempt else { return }
+        reconnect(automatic: true)
+    }
+    func reconnect(automatic: Bool = false) {
         guard !unlock.isBusy, !reconnecting, !pairing else { return }
+        if !automatic { active = true; retryDelay = 2 }
+        nextConnectionAttempt = ProcessInfo.processInfo.systemUptime + retryDelay
+        retryDelay = min(30, retryDelay * 2)
         cancelInput()
         clearHistory()
         ready = false; sessionNotice = nil; reconnecting = true
@@ -194,6 +220,7 @@ final class RemoteModel: ObservableObject {
             defer { reconnecting = false }
             do {
                 if relay.saved?.identity.requiresBiometry != true { try await unlock.require() }
+                guard active else { return }
                 relay.connect()
             }
             catch { relay.disconnect(); self.error = error.localizedDescription }
@@ -227,7 +254,7 @@ final class RemoteModel: ObservableObject {
     func claim() { guard canClaim else { return }; scrollback.returnToLive(); loadingHistory = false; relay.send(Message("claim", sessionID: selected)); objectWillChange.send() }
     func release() { cancelInput(); if owner == credentials?.clientID { relay.send(Message("release", sessionID: selected)) }; owner = "" }
     func leave() { release(); selected = nil; ready = false; clearHistory() }
-    func suspend() { cancelPairing(); unlock.invalidate(); release(); relay.disconnect(); ready = false; sessions = []; clearHistory() }
+    func suspend() { active = false; cancelPairing(); unlock.invalidate(); release(); relay.disconnect(); ready = false; sessions = []; clearHistory() }
     func resize(_ size: TerminalSize) {
         viewport = size
         sendSize()

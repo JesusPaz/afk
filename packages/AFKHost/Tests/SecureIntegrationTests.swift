@@ -261,6 +261,52 @@ import Security
         try await Task.sleep(for: .milliseconds(500))
         XCTAssertFalse(received.contains { $0.type == "welcome" })
         XCTAssertNotEqual(session.lease.owner, saved.credentials.clientID)
+
+    }
+    func testConnectionHealthRecoveryPreservesSessions() async throws {
+        try await withTestHost { host, accounts in
+            let account = "secure-test-" + UUID().uuidString
+            accounts.append(account)
+            let phone = SecurePhoneRelay(account: account, persist: { try SecretStore.write($0, account: account) })
+            defer { phone.disconnect() }
+            var received: [Message] = []
+            phone.onMessage = { received.append($0) }
+            await host.makePairing()
+            let saved = try await approvedPair(phone, invitation: XCTUnwrap(host.pairing).secret, host: host)
+            let session = try XCTUnwrap(host.create())
+            host.setAccess(client: saved.credentials.clientID, session: session.id, level: .control)
+            phone.send(Message("claim", sessionID: session.id))
+            try await until { session.lease.owner == saved.credentials.clientID }
+            // A silent endpoint fails its health deadline; recovery keeps the same host and shell.
+            let hostID = host.host?.id
+            let hostProbe = ProcessInfo.processInfo.systemUptime
+            host.relay.checkConnection(now: hostProbe, force: true)
+            host.relay.checkConnection(now: hostProbe + 16)
+            XCTAssertFalse(host.relay.connected)
+            host.checkConnection()
+            try await until { host.relay.connected }
+            XCTAssertEqual(host.host?.id, hostID)
+            XCTAssertTrue(session.running)
+            received = []; phone.connect()
+            try await until { received.contains { $0.type == "welcome" } }
+            received = []
+            phone.checkConnection(force: true)
+            try await until { received.contains { $0.type == "sessions" } }
+            XCTAssertTrue(phone.isConnected)
+            XCTAssertNotEqual(session.lease.owner, saved.credentials.clientID)
+            let phoneProbe = ProcessInfo.processInfo.systemUptime
+            phone.checkConnection(now: phoneProbe, force: true)
+            phone.checkConnection(now: phoneProbe + 11)
+            XCTAssertFalse(phone.isConnected)
+            XCTAssertTrue(phone.retryable)
+            phone.connect()
+            try await until { phone.isConnected }
+            host.pause()
+            host.checkConnection(force: true)
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertFalse(host.relay.connected)
+            XCTAssertFalse(host.connecting)
+        }
     }
     func testConsentCancellationConcurrencyAndPhonePersistence() async throws {
         try await withTestHost { host, accounts in
