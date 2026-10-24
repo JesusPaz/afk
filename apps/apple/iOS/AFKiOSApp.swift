@@ -269,6 +269,8 @@ struct PhoneTerminal: View {
     let title: String
     @Environment(\.dismiss) private var dismiss
     @State private var confirmEnd = false
+    @State private var draft = ""
+    @State private var mirroredDraft = ""
     private var currentSession: SessionInfo { model.sessions.first(where: { $0.id == session.id }) ?? session }
     private var terminalTitle: String {
         let duplicate = model.sessions.filter { $0.name == currentSession.name && $0.context == currentSession.context }.count > 1
@@ -309,12 +311,26 @@ struct PhoneTerminal: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 8)
             Divider()
-            TerminalCanvas(feed: model.feed, editable: model.canWrite && running, input: model.input, resize: model.resize)
+            TerminalCanvas(feed: model.feed, editable: model.canWrite && running, input: { releaseDraft(); model.input($0) }, resize: model.resize)
             if model.canWrite && running {
+                HStack(spacing: 8) {
+                    // A native field gets reliable iOS dictation; each edit reaches the terminal as it happens.
+                    TextField(L10n.text("Escribe o dicta un comando"), text: $draft)
+                        .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .submitLabel(.send).onSubmit(sendDraft)
+                        .onChange(of: draft) { _, next in
+                            let plain = TerminalLineEdit.plain(next)
+                            guard plain == next else { draft = plain; return }
+                            let edit = TerminalLineEdit.bytes(from: mirroredDraft, to: next)
+                            if edit.isEmpty || model.input(edit) { mirroredDraft = next } else { releaseDraft() }
+                        }
+                    Button(L10n.text("Enviar"), systemImage: "return", action: sendDraft)
+                        .labelStyle(.iconOnly).buttonStyle(.borderedProminent).frame(minWidth: 44, minHeight: 44)
+                }.padding(.horizontal, 12).padding(.top, 6)
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach([("Esc", "\u{1b}"), ("Tab", "\t"), ("Ctrl+C", "\u{3}"), ("↑", "\u{1b}[A"), ("↓", "\u{1b}[B"), ("←", "\u{1b}[D"), ("→", "\u{1b}[C")], id: \.0) { key in
-                            Button(key.0) { model.input(Data(key.1.utf8)) }
+                            Button(key.0) { releaseDraft(); model.input(Data(key.1.utf8)) }
                                 .font(.subheadline.monospaced()).frame(minWidth: 44, minHeight: 44)
                                 .accessibilityLabel(keyLabel(key.0))
                         }
@@ -325,6 +341,7 @@ struct PhoneTerminal: View {
                     .font(.caption).foregroundStyle(.secondary).padding(10)
             }
         }
+        .onChange(of: running) { _, _ in releaseDraft() }
         .confirmationDialog(L10n.text(currentSession.canRemove == true ? "¿Cerrar y quitar esta sesión?" : "¿Terminar esta sesión?"), isPresented: $confirmEnd, titleVisibility: .visible) {
             Button(L10n.text(currentSession.canRemove == true ? "Cerrar y quitar" : "Terminar sesión"), role: .destructive) { model.closeSession(session.id) }
         } message: { Text([currentSession.group?.name, currentSession.name].compactMap { $0 }.joined(separator: " / ") + "\n" + L10n.text("Se detendrá la terminal. Su historial guardado se conservará.")) }
@@ -343,6 +360,12 @@ struct PhoneTerminal: View {
             }
         }
     }
+    private func sendDraft() {
+        // The text is already on the terminal line; Enter runs it and the field starts over.
+        releaseDraft(); model.input(Data("\r".utf8))
+    }
+    /// Leaves whatever is on the terminal line there and stops mirroring it.
+    private func releaseDraft() { mirroredDraft = ""; draft = "" }
     private func keyLabel(_ key: String) -> String {
         switch key {
         case "↑": return L10n.text("Flecha arriba")
