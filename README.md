@@ -20,7 +20,7 @@ One shell runs on the Mac. Both apps render the same output; only the current co
 
 ## Run locally
 
-Requires macOS 14+, Xcode 26.3 (including its Metal Toolchain and an iOS simulator runtime), Go 1.26.9+, Docker Compose and Python 3. iPhone target: iOS 17+. Dependencies are locked in `go.sum` and `Package.resolved`.
+Requires macOS 14+, Xcode 26.3 (including its Metal Toolchain and an iOS simulator runtime), Go 1.26.10+, Docker Compose and Python 3. iPhone target: iOS 17+. Dependencies are locked in `go.sum` and `Package.resolved`.
 
 ```sh
 ./scripts/setup-dev.sh
