@@ -17,9 +17,9 @@ fails to validate the current workflow schema).
 | --- | --- | --- |
 | CI | PR, main push, reusable call | Go race + PostgreSQL, vet, Swift tests, both app builds, packaging tests, Docker build |
 | Publish relay candidate | Manual, chosen branch/commit | After CI, pushes `ghcr.io/jesuspaz/afk-relay:sha-<full commit>` for amd64/arm64; uploads exact digest |
-| Release | Manual on main, explicit `vX.Y.Z` or `vX.Y.Z-rc.N` | CI → EAS Mac DMG + ZIP and internal iOS upload → versioned relay image → annotated tag at tested SHA → GitHub Release → Homebrew PR |
+| Release | Manual on main, explicit `vX.Y.Z` or `vX.Y.Z-rc.N` | CI → EAS Mac DMG + ZIP and internal iOS upload → versioned relay image → annotated tag at tested SHA → GitHub Release → Homebrew PR, merged automatically |
 | TestFlight internal | Manual, chosen branch/commit + version label | CI → EAS signed iOS archive → internal-only upload; no Git tag or public App Review |
-| Homebrew update | Called after release, or manual retry | Downloads release cask and opens a PR in your configured tap; never auto-merges |
+| Homebrew update | Called after release, or manual retry | Downloads release cask, opens a PR in your configured tap and squash-merges it; rerunning it for the same tag is safe |
 
 Version input is explicit rather than calculated from commit messages. Start with
 `v0.1.0-rc.1`, then `v0.1.0-rc.2`; use `v0.1.0` only when ready. RC releases are
@@ -45,7 +45,7 @@ non-cancelling GitHub queue and the reusable `apple.yml` workflow.
 
 Store Apple values below in AFK's **EAS production environment**, at project scope.
 Use secret visibility for private keys, PKCS#12 passwords and provisioning profiles.
-Keep Homebrew variables/secrets in GitHub. The tap PR is opt-in: set
+Keep Homebrew variables/secrets in GitHub. The tap update is opt-in: set
 `HOMEBREW_TAP_REPOSITORY` together with its scoped token to enable it; without them,
 the release still includes the generated cask for a manual tap update. Never print secret values or attach them
 to a release. Uploading existing signing identities to EAS requires the owner's
