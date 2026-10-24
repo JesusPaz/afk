@@ -162,7 +162,6 @@
 "server.too many requests" = "Demasiados intentos. Espera un momento y vuelve a intentarlo.";
 
 // Secure device pairing
-"Mostrar la invitación segura para vincular un iPhone" = "Mostrar la invitación segura para vincular un iPhone";
 "Pega la invitación segura" = "Pega la invitación segura";
 "Copia la invitación que aparece en tu Mac." = "Copia la invitación que aparece en tu Mac.";
 "Copia la invitación segura del Mac y pégala aquí. Incluye la identidad del Mac y el servidor." = "Copia la invitación segura del Mac y pégala aquí. Incluye la identidad del Mac y el servidor.";
@@ -323,7 +322,6 @@
 
 "Color" = "Color";
 
-"Crear sesión o grupo" = "Crear sesión o grupo";
 
 "Deshacer" = "Deshacer";
 
@@ -476,3 +474,10 @@
 "No se pudo enviar toda la entrada. Revisa la terminal antes de continuar." = "No se pudo enviar toda la entrada. Revisa la terminal antes de continuar.";
 "Recuperando historial…" = "Recuperando historial…";
 "El historial no está disponible. La pantalla en vivo sigue conectada." = "El historial no está disponible. La pantalla en vivo sigue conectada.";
+"Ir" = "Ir";
+"Ir a terminal…" = "Ir a terminal…";
+"Terminal anterior" = "Terminal anterior";
+"Terminal siguiente" = "Terminal siguiente";
+"Busca por nombre, carpeta, grupo o perfil" = "Busca por nombre, carpeta, grupo o perfil";
+"Ninguna terminal coincide" = "Ninguna terminal coincide";
+"Nueva sesión junto a la actual (⌘N). Mantén pulsado para crear un grupo o perfil." = "Nueva sesión junto a la actual (⌘N). Mantén pulsado para crear un grupo o perfil.";

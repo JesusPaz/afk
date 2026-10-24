@@ -77,21 +77,45 @@ private struct MacSettings: View {
     }
 }
 
-private struct CreateSessionActionKey: FocusedValueKey {
-    typealias Value = () -> Void
+private struct WorkspaceNavigation {
+    let createSession: () -> Void
+    let step: (Int) -> Void
+    let jump: (Int) -> Void
+    let profiles: [String]
+    let selectProfile: (Int) -> Void
+    let quickOpen: () -> Void
+}
+private struct WorkspaceNavigationKey: FocusedValueKey {
+    typealias Value = WorkspaceNavigation
 }
 private extension FocusedValues {
-    var createSession: (() -> Void)? {
-        get { self[CreateSessionActionKey.self] }
-        set { self[CreateSessionActionKey.self] = newValue }
+    var workspace: WorkspaceNavigation? {
+        get { self[WorkspaceNavigationKey.self] }
+        set { self[WorkspaceNavigationKey.self] = newValue }
     }
 }
 private struct SessionWorkspaceCommands: Commands {
-    @FocusedValue(\.createSession) private var createSession
+    @FocusedValue(\.workspace) private var workspace
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button(L10n.text("Nueva sesión")) { createSession?() }.keyboardShortcut("n")
-                .disabled(createSession == nil)
+            Button(L10n.text("Nueva sesión")) { workspace?.createSession() }.keyboardShortcut("n")
+                .disabled(workspace == nil)
+        }
+        CommandMenu(L10n.text("Ir")) {
+            Button(L10n.text("Ir a terminal…")) { workspace?.quickOpen() }.keyboardShortcut("k")
+            Divider()
+            Button(L10n.text("Terminal anterior")) { workspace?.step(-1) }.keyboardShortcut(.upArrow, modifiers: [.command, .option])
+            Button(L10n.text("Terminal siguiente")) { workspace?.step(1) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            Divider()
+            ForEach(1...9, id: \.self) { number in
+                Button(L10n.format("Terminal %lld", number)) { workspace?.jump(number - 1) }
+                    .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
+            }
+            Divider()
+            ForEach(Array((workspace?.profiles ?? []).prefix(9).enumerated()), id: \.offset) { index, name in
+                Button(name) { workspace?.selectProfile(index) }
+                    .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command, .control])
+            }
         }
     }
 }
@@ -134,6 +158,38 @@ struct MacWorkspace: View {
     @State private var removedGroupSessions: [String] = []
     @State private var removedGroupProfile: WorkspaceProfile = .personal
     @State private var emptyTitle: String?
+    @State private var showingSwitcher = false
+    @State private var pendingSelection: String?
+
+    // Sidebar order: groups first, then ungrouped sessions.
+    private var navigationOrder: [HostSession] {
+        profileGroups.flatMap { visible(groupID: $0.id) } + visible(groupID: nil)
+    }
+    private func open(_ session: HostSession) {
+        expand(session.groupID)
+        // Switching profile clears the selection, so select once that has happened.
+        if session.profile != profile { pendingSelection = session.id; profile = session.profile }
+        else { selected = session.id }
+    }
+    private func expand(_ groupID: String?) {
+        guard let groupID, collapsedGroups.contains(groupID) else { return }
+        collapsedGroupIDs = collapsedGroups.subtracting([groupID]).sorted().joined(separator: ",")
+    }
+    private func step(_ offset: Int) {
+        let order = navigationOrder
+        guard !order.isEmpty else { return }
+        let current = order.firstIndex { $0.id == selected } ?? (offset > 0 ? -1 : order.count)
+        open(order[(current + offset + order.count) % order.count])
+    }
+    private var navigation: WorkspaceNavigation {
+        WorkspaceNavigation(
+            createSession: { createSession(groupID: host.sessions.first { $0.id == selected }?.groupID) },
+            step: step,
+            jump: { index in if navigationOrder.indices.contains(index) { open(navigationOrder[index]) } },
+            profiles: host.profiles.map(profileName),
+            selectProfile: { index in if host.profiles.indices.contains(index) { profile = host.profiles[index] } },
+            quickOpen: { showingSwitcher = true })
+    }
 
     private func createSession(groupID: String? = nil) {
         guard let session = host.create(profile: profile) else { return }
@@ -155,6 +211,19 @@ struct MacWorkspace: View {
         else { host.removeEnded(id: session.id) }
     }
     private func profileName(_ profile: WorkspaceProfile) -> String { host.profileName(profile) }
+    private var profilePicker: some View {
+        Picker(L10n.text("Perfil"), selection: $profile) {
+            ForEach(host.profiles, id: \.self) { profile in
+                Text(profileName(profile)).tag(profile)
+            }
+        }.accessibilityIdentifier("workspace-profile")
+    }
+    private func dropHighlight(_ targeted: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(Color.accentColor.opacity(targeted ? 0.18 : 0))
+            .strokeBorder(Color.accentColor.opacity(targeted ? 0.7 : 0), lineWidth: 1.5)
+            .animation(.easeOut(duration: 0.12), value: targeted)
+    }
     private var profileSessions: [HostSession] { host.sessions.filter { $0.profile == profile } }
     private var profileGroups: [SessionGroup] { host.groups.filter { host.profile(forGroup: $0.id) == profile } }
     private var hidden: [HostSession] { profileSessions.filter(\.isHidden) }
@@ -187,9 +256,10 @@ struct MacWorkspace: View {
                             Text(visible(groupID: group.id).count.formatted()).foregroundStyle(.secondary).font(.caption.monospacedDigit())
                         }
                         .contentShape(Rectangle())
-                        .background(targetedGroup == group.id ? Color.accentColor.opacity(0.15) : .clear)
+                        .padding(.vertical, 3).padding(.horizontal, 4)
+                        .background(dropHighlight(targetedGroup == group.id))
                         .dropDestination(for: SessionDrag.self) { items, _ in
-                            host.dropSessions(items.map(\.id), groupID: group.id, profile: profile)
+                            drop(items, into: group.id)
                         } isTargeted: { targetedGroup = $0 ? group.id : nil }
                         .contextMenu { groupActions(group) }
                     }
@@ -202,16 +272,17 @@ struct MacWorkspace: View {
                             .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
                             .contentShape(Rectangle())
                             .dropDestination(for: SessionDrag.self) { items, _ in
-                                host.dropSessions(items.map(\.id), groupID: nil, profile: profile)
+                                drop(items, into: nil)
                             } isTargeted: { targetedGroup = $0 ? "ungrouped" : nil }
                     }
                 } header: {
                     Text(L10n.text("Sin grupo"))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
-                        .background(targetedGroup == "ungrouped" ? Color.accentColor.opacity(0.15) : .clear)
+                        .padding(.vertical, 3).padding(.horizontal, 4)
+                        .background(dropHighlight(targetedGroup == "ungrouped"))
                         .dropDestination(for: SessionDrag.self) { items, _ in
-                            host.dropSessions(items.map(\.id), groupID: nil, profile: profile)
+                            drop(items, into: nil)
                         } isTargeted: { targetedGroup = $0 ? "ungrouped" : nil }
                 }
                 if !hidden.isEmpty {
@@ -235,24 +306,11 @@ struct MacWorkspace: View {
             }
             .listStyle(.sidebar)
             .safeAreaInset(edge: .top) {
-                VStack(spacing: 12) {
-                    HStack {
-                        Text("AFK").font(.title2.weight(.semibold))
-                        Spacer()
-                        Menu {
-                            Button(L10n.text("Nueva sesión")) { createSession() }
-                            Button(L10n.text("Nuevo grupo…")) { editingGroup = nil; showingGroupEditor = true }
-                            Button(L10n.text("Nuevo perfil…")) { newProfileName = ""; showingProfileEditor = true }
-                                .disabled(host.profiles.count >= 64)
-                        } label: { Image(systemName: "plus") }
-                        .menuStyle(.borderlessButton).fixedSize()
-                        .accessibilityLabel(L10n.text("Crear sesión o grupo"))
-                    }
-                    Picker(L10n.text("Perfil"), selection: $profile) {
-                        ForEach(host.profiles, id: \.self) { profile in
-                            Text(profileName(profile)).tag(profile)
-                        }
-                    }.pickerStyle(.menu).accessibilityIdentifier("workspace-profile")
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("AFK").font(.title2.weight(.semibold))
+                    // Tabs while they fit; ⌃⌘1…9 switch profiles either way.
+                    if host.profiles.count <= 4 { profilePicker.pickerStyle(.segmented).labelsHidden() }
+                    else { profilePicker.pickerStyle(.menu) }
                 }.padding(.horizontal, 16).padding(.vertical, 12)
             }
             .safeAreaInset(edge: .bottom) {
@@ -279,8 +337,6 @@ struct MacWorkspace: View {
                     }
                     Divider()
                     Button { showingHistory = true } label: { Label(L10n.text("Historial guardado"), systemImage: "clock") }
-                    Button { createSession() } label: { Label(L10n.text("Nueva sesión"), systemImage: "plus") }
-                    Button { editingGroup = nil; showingGroupEditor = true } label: { Label(L10n.text("Nuevo grupo…"), systemImage: "folder.badge.plus") }
                     Button { sheet = .devices } label: { Label(L10n.text("Dispositivos"), systemImage: "iphone") }
                     Button { sheet = .server } label: { Label(L10n.text("Conexión"), systemImage: "network") }
                     RemoteAccessStatus(host: host, relay: host.relay).padding(.top, 4)
@@ -291,7 +347,7 @@ struct MacWorkspace: View {
             ZStack {
                 // Keep every live renderer attached, including hidden sessions.
                 ForEach(host.sessions) { session in
-                    LocalTerminalPane(session: session, active: session.profile == profile && session.id == selected && !session.isHidden && !session.closing && sheet == nil && !showingHistory && renaming == nil && !showingGroupEditor && !showingProfileEditor && closingSession == nil,
+                    LocalTerminalPane(session: session, active: session.profile == profile && session.id == selected && !session.isHidden && !session.closing && sheet == nil && !showingHistory && renaming == nil && !showingGroupEditor && !showingProfileEditor && !showingSwitcher && closingSession == nil,
                                       actions: { AnyView(sessionActions(session)) })
                         .opacity(session.profile == profile && session.id == selected ? 1 : 0)
                         .allowsHitTesting(session.profile == profile && session.id == selected)
@@ -309,14 +365,18 @@ struct MacWorkspace: View {
                 }
             }
         }
-        .focusedSceneValue(\.createSession, { createSession() })
+        .focusedSceneValue(\.workspace, navigation)
         .navigationTitle(host.sessions.first(where: { $0.id == selected })?.name ?? "AFK")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { sheet = .pair } label: { Label(L10n.text("Vincular iPhone"), systemImage: "plus").fixedSize() }
-                    .buttonStyle(.borderedProminent)
-                    .help(L10n.text("Mostrar la invitación segura para vincular un iPhone"))
-                    .accessibilityIdentifier("pair-iphone")
+                Menu {
+                    Button(L10n.text("Nueva sesión")) { navigation.createSession() }
+                    Button(L10n.text("Nuevo grupo…")) { editingGroup = nil; showingGroupEditor = true }
+                    Button(L10n.text("Nuevo perfil…")) { newProfileName = ""; showingProfileEditor = true }
+                        .disabled(host.profiles.count >= 64)
+                } label: { Label(L10n.text("Nueva sesión"), systemImage: "plus") } primaryAction: { navigation.createSession() }
+                    .help(L10n.text("Nueva sesión junto a la actual (⌘N). Mantén pulsado para crear un grupo o perfil."))
+                    .accessibilityIdentifier("new-session")
             }
         }
         .sheet(isPresented: $showingHistory) {
@@ -325,6 +385,9 @@ struct MacWorkspace: View {
         .sheet(item: $sheet) { destination in
             MacConnectionSheet(host: host, server: $server, destination: destination,
                                session: destination == .permissions ? permissionSession : nil)
+        }
+        .sheet(isPresented: $showingSwitcher) {
+            SessionSwitcher(host: host, currentProfile: profile, open: open)
         }
         .sheet(item: $renaming) { session in
             SessionNameEditor(session: session) { host.renameSession(id: session.id, label: $0) }
@@ -375,7 +438,7 @@ struct MacWorkspace: View {
             if let selected, !next.contains(selected) { self.selected = nil }
         }
         .onChange(of: profile) { _, _ in
-            selected = nil; emptyTitle = nil; lastHidden = nil; removedGroup = nil
+            selected = pendingSelection; pendingSelection = nil; emptyTitle = nil; lastHidden = nil; removedGroup = nil
         }
     }
 
@@ -383,10 +446,17 @@ struct MacWorkspace: View {
         MacSessionRow(session: session, group: group(for: session),
                       disambiguate: host.sessions.filter { $0.name == session.name }.count > 1)
             .tag(session.id).contextMenu { sessionActions(session) }
-            .draggable(SessionDrag(id: session.id))
+            .draggable(SessionDrag(id: session.id)) { SessionDragPreview(session: session, group: group(for: session)) }
             .dropDestination(for: SessionDrag.self) { items, _ in
-                host.dropSessions(items.map(\.id), groupID: session.groupID, profile: profile)
-            }
+                drop(items, into: session.groupID)
+            } isTargeted: { targetedGroup = $0 ? session.groupID ?? "ungrouped" : nil }
+    }
+    private func drop(_ items: [SessionDrag], into groupID: String?) -> Bool {
+        targetedGroup = nil
+        expand(groupID)
+        return withAnimation(.snappy(duration: 0.25)) {
+            host.dropSessions(items.map(\.id), groupID: groupID, profile: profile)
+        }
     }
     @ViewBuilder private func sessionActions(_ session: HostSession) -> some View {
         Button(L10n.text("Renombrar…")) { renaming = session }
@@ -450,6 +520,95 @@ struct MacWorkspace: View {
             removedGroupSessions = host.sessions.filter { $0.groupID == group.id }.map(\.id)
             host.deleteGroup(id: group.id)
         }
+    }
+}
+
+private struct SessionDragPreview: View {
+    @ObservedObject var session: HostSession
+    let group: SessionGroup?
+    var body: some View {
+        HStack(spacing: 10) {
+            SessionGroupMark(group: group)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.name).fontWeight(.medium).lineLimit(1)
+                if let context = session.context, !context.isEmpty {
+                    Text(context).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(width: 240, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+        .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
+    }
+}
+
+private struct SessionSwitcher: View {
+    @ObservedObject var host: HostController
+    let currentProfile: WorkspaceProfile
+    let open: (HostSession) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var highlighted = 0
+    @FocusState private var focused: Bool
+    private var matches: [HostSession] {
+        let running = host.sessions.filter { $0.running && !$0.closing }
+        let live = running.filter { $0.profile == currentProfile } + running.filter { $0.profile != currentProfile }
+        let terms = query.split(separator: " ").map(String.init)
+        guard !terms.isEmpty else { return live }
+        return live.filter { session in
+            let text = [session.name, session.context, host.groups.first { $0.id == session.groupID }?.name, host.profileName(session.profile)]
+                .compactMap { $0 }.joined(separator: " ")
+            return terms.allSatisfy { text.localizedCaseInsensitiveContains($0) }
+        }
+    }
+    private func choose(_ index: Int) {
+        let results = matches
+        guard results.indices.contains(index) else { return }
+        dismiss(); open(results[index])
+    }
+    var body: some View {
+        VStack(spacing: 0) {
+            TextField(L10n.text("Busca por nombre, carpeta, grupo o perfil"), text: $query)
+                .textFieldStyle(.plain).font(.title3).padding(14).focused($focused)
+                .onSubmit { choose(highlighted) }
+                .onKeyPress(.downArrow) { highlighted = min(highlighted + 1, max(matches.count - 1, 0)); return .handled }
+                .onKeyPress(.upArrow) { highlighted = max(highlighted - 1, 0); return .handled }
+                .onChange(of: query) { _, _ in highlighted = 0 }
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 2) {
+                        ForEach(Array(matches.enumerated()), id: \.element.id) { index, session in
+                            Button { choose(index) } label: {
+                                HStack(spacing: 10) {
+                                    SessionGroupMark(group: host.groups.first { $0.id == session.groupID })
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(session.name).lineLimit(1)
+                                        Text([host.profileName(session.profile), host.groups.first { $0.id == session.groupID }?.name, session.context]
+                                            .compactMap { $0 }.joined(separator: " · "))
+                                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(index == highlighted ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(Rectangle())
+                            }.buttonStyle(.plain).id(index)
+                        }
+                        if matches.isEmpty {
+                            Text(L10n.text("Ninguna terminal coincide")).foregroundStyle(.secondary).padding(20)
+                        }
+                    }.padding(6)
+                }
+                .onChange(of: highlighted) { _, index in proxy.scrollTo(index) }
+            }
+            .frame(height: 320)
+        }
+        .frame(width: 520)
+        .onAppear { focused = true }
+        .onExitCommand { dismiss() }
     }
 }
 
