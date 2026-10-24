@@ -113,6 +113,12 @@ final class SessionOrganizationTests: XCTestCase {
         XCTAssertEqual(session.context, "warden")
         session.rename(nil)
         XCTAssertEqual(session.name, "Other")
+        session.screen?.append(Data("\u{1b}]0;Investiga | warden\u{7}".utf8))
+        XCTAssertEqual(session.name, "Investiga")
+        session.screen?.append(Data("\u{1b}]0;Investiga | \(home.lastPathComponent)\u{7}".utf8))
+        XCTAssertEqual(session.name, "Investiga")
+        session.screen?.append(Data("\u{1b}]0;A | B\u{7}".utf8))
+        XCTAssertEqual(session.name, "A | B")
         XCTAssertEqual(SessionMetadata.clean("\u{202e}name\n\u{7}"), "name")
         XCTAssertEqual(SessionMetadata.clean(String(repeating: "x", count: 9000))?.count, 120)
     }
@@ -197,6 +203,9 @@ final class SessionOrganizationTests: XCTestCase {
         defer { preferences.removePersistentDomain(forName: suite) }
         let host = HostController(preferences: preferences)
         defer { host.shutdown() }
+        XCTAssertEqual(host.sessionLimit, 24)
+        preferences.set(8, forKey: HostController.sessionLimitKey)
+        XCTAssertEqual(host.sessionLimit, 8)
         let ended = try XCTUnwrap(host.create())
         ended.localInput(Data("exit\n".utf8))
         for _ in 0..<100 where ended.running { try await Task.sleep(for: .milliseconds(50)) }

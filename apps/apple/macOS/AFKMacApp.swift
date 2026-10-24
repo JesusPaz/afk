@@ -60,6 +60,20 @@ struct AFKMacApp: App {
         WindowGroup("AFK") { MacWorkspace(host: host).onAppear { delegate.host = host } }
             .defaultSize(width: 1040, height: 720)
             .commands { SessionWorkspaceCommands() }
+        Settings { MacSettings() }
+    }
+}
+
+private struct MacSettings: View {
+    @AppStorage(HostController.sessionLimitKey) private var sessionLimit = HostController.defaultSessionLimit
+    var body: some View {
+        Form {
+            Stepper(value: $sessionLimit, in: HostController.sessionLimitRange) {
+                LabeledContent(L10n.text("Sesiones abiertas a la vez"), value: "\(sessionLimit)")
+            }
+            Text(L10n.text("Cada sesión mantiene su shell, su pantalla y su grabación en memoria. Las sesiones terminadas no cuentan."))
+                .font(.caption).foregroundStyle(.secondary)
+        }.padding(20).frame(width: 420)
     }
 }
 
@@ -277,7 +291,7 @@ struct MacWorkspace: View {
             ZStack {
                 // Keep every live renderer attached, including hidden sessions.
                 ForEach(host.sessions) { session in
-                    LocalTerminalPane(session: session, group: group(for: session), active: session.profile == profile && session.id == selected && !session.isHidden && !session.closing && sheet == nil && !showingHistory && renaming == nil && !showingGroupEditor && !showingProfileEditor && closingSession == nil,
+                    LocalTerminalPane(session: session, active: session.profile == profile && session.id == selected && !session.isHidden && !session.closing && sheet == nil && !showingHistory && renaming == nil && !showingGroupEditor && !showingProfileEditor && closingSession == nil,
                                       actions: { AnyView(sessionActions(session)) })
                         .opacity(session.profile == profile && session.id == selected ? 1 : 0)
                         .allowsHitTesting(session.profile == profile && session.id == selected)
@@ -761,22 +775,11 @@ private struct AccessToggle: View {
 
 struct LocalTerminalPane: View {
     @ObservedObject var session: HostSession
-    let group: SessionGroup?
     let active: Bool
     let actions: () -> AnyView
     private var localControl: Bool { session.lease.owner == "local" }
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                SessionGroupMark(group: group)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(group?.name ?? L10n.text("Sin grupo")).font(.caption).foregroundStyle(.secondary)
-                    Text(session.name).font(.headline).lineLimit(1)
-                }
-                Spacer()
-                if let context = session.context { Text(context).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
-            }.padding(.horizontal, 16).padding(.vertical, 10)
-            Divider()
             HStack(spacing: 12) {
                 Image(systemName: !session.running ? "stop.circle" : localControl ? "keyboard" : "eye")
                     .foregroundStyle(localControl ? AFKStyle.accent : .secondary)

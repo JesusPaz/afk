@@ -81,7 +81,7 @@ The unsigned commands above are compile checks. To **run** the iPhone simulator 
 
 ## Current boundaries
 
-- Up to eight sessions and eight connected clients per Mac; iPhone remembers one Mac.
+- Up to 24 live sessions by default (adjustable in Settings, 1–64) and eight connected clients per Mac; iPhone remembers one Mac.
 - The current controller determines the shared terminal size: Mac window or iPhone viewport (including rotation and keyboard). Observers retain that grid and can scroll when it is larger than their screen. Updated iPhones open the current screen immediately and fetch older history automatically when scrolling backward. The Mac keeps the complete recording on disk. Older iPhones still use the 256 KiB snapshot protocol; update both apps for long sessions.
 - Sessions survive closing the Mac window, **not quitting AFK, reboot or sleep with an active network connection**. There is no separate background helper yet.
 - Manual reconnect. No offline keystroke queue or automatic retries of input.
@@ -212,7 +212,7 @@ Hide keeps a session running and can be undone. Hidden state is local to each de
 Close and remove waits for the shell and foreground process group to exit, then
 removes the row while preserving saved history. Detached processes and external
 services are outside that guarantee. Ended sessions have a separate section and do
-not consume the eight-live-session limit. Hiding or removing the selected session
+not consume the live-session limit. Hiding or removing the selected session
 never transfers typing to another terminal automatically.
 
 See [the feature plans and validation](docs/plans/session-organization/README.md).
