@@ -266,13 +266,14 @@ final class RemoteModel: ObservableObject {
         m.epoch = epoch; m.sequence = inputSequence; m.columns = viewport.columns; m.rows = viewport.rows
         relay.send(m)
     }
-    func input(_ bytes: Data) {
-        guard canWrite else { return }
+    @discardableResult func input(_ bytes: Data) -> Bool {
+        guard canWrite else { return false }
         guard inputBuffer.append(bytes) else {
             release()
             sessionNotice = L10n.text("La entrada es demasiado grande. Se detuvo el envío; revisa la terminal antes de continuar.")
-            return
+            return false
         }
+        return true
     }
     private func sendInput(_ bytes: Data, retry: UInt64?) -> UInt64? {
         guard canClaim, owner == credentials?.clientID else { cancelInput(); return nil }
