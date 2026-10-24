@@ -58,7 +58,10 @@ jobs:
           else
             git push origin "$branch"
           fi
-          if [[ -n "$(gh pr list -R "$TAP_REPOSITORY" --head "$branch" --json number --jq '.[].number')" ]]; then exit 0; fi
-          gh pr create -R "$TAP_REPOSITORY" --head "$branch" \
-            --title "Update $token to $RELEASE_TAG" \
-            --body "Install the signed, notarized AFK release with its SHA-256 checksum. Tracks https://github.com/JesusPaz/afk/issues/3."
+          if [[ -z "$(gh pr list -R "$TAP_REPOSITORY" --head "$branch" --json number --jq '.[].number')" ]]; then
+            gh pr create -R "$TAP_REPOSITORY" --head "$branch" \
+              --title "Update $token to $RELEASE_TAG" \
+              --body "Install the signed, notarized AFK release with its SHA-256 checksum. Tracks https://github.com/JesusPaz/afk/issues/3."
+          fi
+          # The cask comes from the release that already verified checksum, signature and notarization.
+          gh pr merge -R "$TAP_REPOSITORY" "$branch" --squash --delete-branch
