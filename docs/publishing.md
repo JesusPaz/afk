@@ -20,6 +20,7 @@ fails to validate the current workflow schema).
 | Release | Manual on main, explicit `vX.Y.Z` or `vX.Y.Z-rc.N` | CI → EAS Mac DMG + ZIP and internal iOS upload → versioned relay image → annotated tag at tested SHA → GitHub Release → Homebrew PR, merged automatically |
 | TestFlight internal | Manual, chosen branch/commit + version label | CI → EAS signed iOS archive → internal-only upload; no Git tag or public App Review |
 | Homebrew update | Called after release, or manual retry | Downloads release cask, opens a PR in your configured tap and squash-merges it; rerunning it for the same tag is safe |
+| Local release | `scripts/release/local.sh vX.Y.Z[-rc.N]` on the owner's Mac, when EAS minutes run out | Green CI on `origin/main` → clean checkout → Mac universal Developer ID build, notarized DMG + ZIP, cask → iOS upload to TestFlight (internal) → relay image via GitHub → tag + GitHub Release → Homebrew update |
 
 Version input is explicit rather than calculated from commit messages. Start with
 `v0.1.0-rc.1`, then `v0.1.0-rc.2`; use `v0.1.0` only when ready. RC releases are
@@ -234,3 +235,17 @@ References: [Apple uploads](https://developer.apple.com/help/app-store-connect/m
 [GitHub container publishing](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images),
 [Homebrew casks](https://docs.brew.sh/Cask-Cookbook),
 [GitHub macOS runner inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md).
+
+## Local release
+
+`scripts/release/local.sh` produces the same release assets as the Release workflow
+without EAS. It refuses to run unless the tag is new and CI passed on `origin/main`,
+and it builds a detached checkout of that commit, never the working tree. It uses the
+login keychain's Developer ID Application and Apple Distribution identities, the
+notarytool keychain profile `AFK` (override with `AFK_NOTARY_PROFILE`), the installed
+`com.jesuspaz.afk.ios` provisioning profile and the Xcode account for the TestFlight
+upload. The relay image is still built on GitHub (`container.yml` dispatch, only
+from `main` and never for a tag on another commit). A failure before
+"Publishing" leaves no tag or release, though an iOS upload that already happened
+stays in TestFlight. Publishing follows release.yml (tag, draft, upload, publish),
+so rerunning the same tag after a failure there resumes it.
