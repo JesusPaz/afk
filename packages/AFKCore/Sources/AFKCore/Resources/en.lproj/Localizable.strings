@@ -136,7 +136,9 @@
 "No se pudo crear una identidad segura." = "Could not create a secure identity.";
 "No se pudo guardar el vínculo en el llavero." = "Could not save pairing credentials in Keychain.";
 "No se pudo actualizar el llavero." = "Could not update Keychain.";
-"El POC permite hasta ocho sesiones." = "This POC supports up to eight sessions.";
+"Has llegado al límite de %d sesiones. Puedes cambiarlo en Ajustes." = "You’ve reached the limit of %d sessions. You can change it in Settings.";
+"Sesiones abiertas a la vez" = "Sessions open at once";
+"Cada sesión mantiene su shell, su pantalla y su grabación en memoria. Las sesiones terminadas no cuentan." = "Each session keeps its shell, screen and recording in memory. Ended sessions don’t count.";
 "Conecta el Mac al relay primero." = "Connect your Mac to the relay first.";
 "El historial supera el límite del POC. La sesión continúa en el Mac; abre una nueva para compartirla." = "History exceeds the POC limit. The session continues on your Mac; open a new one to share it.";
 "Terminal %lld" = "Terminal %lld";

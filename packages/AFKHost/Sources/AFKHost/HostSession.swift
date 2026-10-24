@@ -28,7 +28,15 @@ public final class HostSession: ObservableObject, Identifiable {
     @Published public internal(set) var isHidden = false
     @Published public private(set) var closing = false
     @Published public private(set) var inputError: String?
-    public var name: String { userLabel ?? reportedTitle ?? context ?? "Terminal · " + id.prefix(4).uppercased() }
+    public var name: String { userLabel ?? shownTitle ?? context ?? "Terminal · " + id.prefix(4).uppercased() }
+    // Codex appends " | <directory>" to its title; the context already says where the shell is.
+    private var shownTitle: String? {
+        guard let title = reportedTitle, let separator = title.range(of: " | ", options: .backwards) else { return reportedTitle }
+        let suffix = String(title[separator.upperBound...])
+        let home = FileManager.default.homeDirectoryForCurrentUser.lastPathComponent
+        guard suffix == context || suffix == home, separator.lowerBound > title.startIndex else { return title }
+        return String(title[..<separator.lowerBound])
+    }
     private var metadataTask: Task<Void, Never>?
     public let feed: TerminalFeed
     @Published public private(set) var running = true

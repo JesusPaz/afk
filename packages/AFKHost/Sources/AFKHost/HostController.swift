@@ -98,11 +98,18 @@ public final class HostController: ObservableObject {
         }
     }
     deinit { if let lockObserver { DistributedNotificationCenter.default().removeObserver(lockObserver) } }
+    public static let sessionLimitKey = "sessionLimit"
+    public static let defaultSessionLimit = 24
+    public static let sessionLimitRange = 1...64
+    public var sessionLimit: Int {
+        let stored = preferences.integer(forKey: Self.sessionLimitKey)
+        return stored == 0 ? Self.defaultSessionLimit : min(max(stored, Self.sessionLimitRange.lowerBound), Self.sessionLimitRange.upperBound)
+    }
     @discardableResult
     public func create(name: String = "Shell", id: String = UUID().uuidString, profile: WorkspaceProfile = .personal) -> HostSession? {
         guard profiles.contains(profile) else { return nil }
         if let existing = sessions.first(where: { $0.id == id }) { return existing }
-        guard sessions.filter({ $0.running }).count < 8 else { error = L10n.text("El POC permite hasta ocho sesiones."); return nil }
+        guard sessions.filter({ $0.running }).count < sessionLimit else { error = L10n.format("Has llegado al límite de %d sesiones. Puedes cambiarlo en Ajustes.", sessionLimit); return nil }
         let recording: TerminalHistory?
         do { recording = try historyDirectory.map { try TerminalHistory(root: $0, name: String(name.prefix(60))) } }
         catch { self.error = error.localizedDescription; return nil }
