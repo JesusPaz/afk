@@ -18,7 +18,7 @@ step() { printf '\n==> %s\n' "$*"; }
 dispatch() {
     local workflow=$1 since id
     since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    gh workflow run "$workflow" -R "$repo" --ref main -f tag="$tag"
+    gh workflow run "$workflow" -R "$repo" --ref main -f tag="$tag" >&2
     for _ in $(seq 60); do
         id=$(gh run list -R "$repo" --workflow "$workflow" --event workflow_dispatch --created ">=$since" \
             --limit 1 --json databaseId,headSha --jq ".[] | select(.headSha == \"$commit\") | .databaseId")
@@ -128,7 +128,8 @@ gh release edit "$tag" -R "$repo" --draft=false "${flags[@]}"
 
 if [[ -n "$(gh variable get HOMEBREW_TAP_REPOSITORY -R "$repo" 2>/dev/null)" ]]; then
     step "Updating Homebrew"
-    gh run watch "$(dispatch homebrew.yml)" -R "$repo" --exit-status > /dev/null
+    brew_run=$(dispatch homebrew.yml)
+    gh run watch "$brew_run" -R "$repo" --exit-status > /dev/null
 fi
 
 step "Done: https://github.com/$repo/releases/tag/$tag"
