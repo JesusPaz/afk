@@ -166,12 +166,14 @@ struct MacWorkspace: View {
         profileGroups.flatMap { visible(groupID: $0.id) } + visible(groupID: nil)
     }
     private func open(_ session: HostSession) {
-        if let groupID = session.groupID, collapsedGroups.contains(groupID) {
-            collapsedGroupIDs = collapsedGroups.subtracting([groupID]).sorted().joined(separator: ",")
-        }
+        expand(session.groupID)
         // Switching profile clears the selection, so select once that has happened.
         if session.profile != profile { pendingSelection = session.id; profile = session.profile }
         else { selected = session.id }
+    }
+    private func expand(_ groupID: String?) {
+        guard let groupID, collapsedGroups.contains(groupID) else { return }
+        collapsedGroupIDs = collapsedGroups.subtracting([groupID]).sorted().joined(separator: ",")
     }
     private func step(_ offset: Int) {
         let order = navigationOrder
@@ -209,6 +211,13 @@ struct MacWorkspace: View {
         else { host.removeEnded(id: session.id) }
     }
     private func profileName(_ profile: WorkspaceProfile) -> String { host.profileName(profile) }
+    private var profilePicker: some View {
+        Picker(L10n.text("Perfil"), selection: $profile) {
+            ForEach(host.profiles, id: \.self) { profile in
+                Text(profileName(profile)).tag(profile)
+            }
+        }.accessibilityIdentifier("workspace-profile")
+    }
     private func dropHighlight(_ targeted: Bool) -> some View {
         RoundedRectangle(cornerRadius: 6)
             .fill(Color.accentColor.opacity(targeted ? 0.18 : 0))
@@ -299,20 +308,9 @@ struct MacWorkspace: View {
             .safeAreaInset(edge: .top) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("AFK").font(.title2.weight(.semibold))
-                    if host.profiles.count <= 4 {
-                        // Tabs while they fit; ⌃⌘1…9 switch profiles either way.
-                        Picker(L10n.text("Perfil"), selection: $profile) {
-                            ForEach(host.profiles, id: \.self) { profile in
-                                Text(profileName(profile)).tag(profile)
-                            }
-                        }.pickerStyle(.segmented).labelsHidden().accessibilityIdentifier("workspace-profile")
-                    } else {
-                        Picker(L10n.text("Perfil"), selection: $profile) {
-                            ForEach(host.profiles, id: \.self) { profile in
-                                Text(profileName(profile)).tag(profile)
-                            }
-                        }.pickerStyle(.menu).accessibilityIdentifier("workspace-profile")
-                    }
+                    // Tabs while they fit; ⌃⌘1…9 switch profiles either way.
+                    if host.profiles.count <= 4 { profilePicker.pickerStyle(.segmented).labelsHidden() }
+                    else { profilePicker.pickerStyle(.menu) }
                 }.padding(.horizontal, 16).padding(.vertical, 12)
             }
             .safeAreaInset(edge: .bottom) {
@@ -455,9 +453,7 @@ struct MacWorkspace: View {
     }
     private func drop(_ items: [SessionDrag], into groupID: String?) -> Bool {
         targetedGroup = nil
-        if let groupID, collapsedGroups.contains(groupID) {
-            collapsedGroupIDs = collapsedGroups.subtracting([groupID]).sorted().joined(separator: ",")
-        }
+        expand(groupID)
         return withAnimation(.snappy(duration: 0.25)) {
             host.dropSessions(items.map(\.id), groupID: groupID, profile: profile)
         }
@@ -557,8 +553,8 @@ private struct SessionSwitcher: View {
     @State private var highlighted = 0
     @FocusState private var focused: Bool
     private var matches: [HostSession] {
-        let live = host.sessions.filter { $0.running && !$0.closing }
-            .sorted { ($0.profile == currentProfile ? 0 : 1) < ($1.profile == currentProfile ? 0 : 1) }
+        let running = host.sessions.filter { $0.running && !$0.closing }
+        let live = running.filter { $0.profile == currentProfile } + running.filter { $0.profile != currentProfile }
         let terms = query.split(separator: " ").map(String.init)
         guard !terms.isEmpty else { return live }
         return live.filter { session in
