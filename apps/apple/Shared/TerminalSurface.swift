@@ -8,6 +8,14 @@ typealias PlatformView = NSView
 final class FileDropTerminalView: TerminalView {
     var acceptsFileInput: (() -> Bool)?
     var fileInput: ((String) -> Void)?
+    // Every session's pane is stacked in the same place, so only the visible one may
+    // claim a drag; an invisible pane on top would otherwise swallow and reject it.
+    var acceptsDrops = false {
+        didSet {
+            guard acceptsDrops != oldValue else { return }
+            if acceptsDrops { registerForDraggedTypes([.fileURL]) } else { unregisterDraggedTypes() }
+        }
+    }
 
     func droppedPaths(_ pasteboard: NSPasteboard) -> String? {
         guard acceptsFileInput?() == true,
@@ -69,9 +77,7 @@ final class TerminalContainer: PlatformView {
 
     override init(frame: CGRect) {
         #if os(macOS)
-        let fileTerminal = FileDropTerminalView(frame: .zero, font: AFKStyle.terminalFont)
-        fileTerminal.registerForDraggedTypes([.fileURL])
-        terminal = fileTerminal
+        terminal = FileDropTerminalView(frame: .zero, font: AFKStyle.terminalFont)
         #else
         terminal = TerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: AFKStyle.terminalFontSize, weight: .regular))
         #endif
@@ -339,6 +345,7 @@ struct TerminalSurface: NSViewRepresentable {
         view.observing = !editable
         context.coordinator.attach(view)
         context.coordinator.active = active
+        (view.terminal as? FileDropTerminalView)?.acceptsDrops = active
         if active { DispatchQueue.main.async { [weak coordinator = context.coordinator] in
             if coordinator?.active == true { view.window?.makeFirstResponder(view.terminal) }
         } }
@@ -347,6 +354,7 @@ struct TerminalSurface: NSViewRepresentable {
     func updateNSView(_ view: TerminalContainer, context: Context) {
         let gainedControl = active && (!context.coordinator.active || (editable && !context.coordinator.editable))
         context.coordinator.active = active
+        (view.terminal as? FileDropTerminalView)?.acceptsDrops = active
         if !active, view.window?.firstResponder === view.terminal { view.window?.makeFirstResponder(nil) }
         view.observing = !editable
         context.coordinator.editable = editable

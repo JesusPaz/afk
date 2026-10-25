@@ -30,7 +30,7 @@ to Homebrew.
 5. On the iPhone, open a session and tap **Type from here** to type or dictate.
 
 Shortcuts on the Mac: **⌘K** go to a terminal, **⌘⌥↑ / ⌘⌥↓** previous / next,
-**⌘1…9** jump, **⌃⌘1…9** switch profile, **⌘N** new session.
+**⌘1…9** jump, **⌘⌥← / ⌘⌥→** or **⌃⌘1…9** switch profile, **⌘N** new session.
 
 ## Docs
 

@@ -68,6 +68,16 @@ final class TerminalLayoutTests: XCTestCase {
         XCTAssertFalse(terminal.receiveFiles(board))
     }
 
+    @MainActor func testOnlyTheVisiblePaneClaimsFileDrags() throws {
+        _ = NSApplication.shared
+        let terminal = try XCTUnwrap(TerminalContainer(frame: .zero).terminal as? FileDropTerminalView)
+        XCTAssertTrue(terminal.registeredDraggedTypes.isEmpty)
+        terminal.acceptsDrops = true
+        XCTAssertEqual(terminal.registeredDraggedTypes, [.fileURL])
+        terminal.acceptsDrops = false
+        XCTAssertTrue(terminal.registeredDraggedTypes.isEmpty)
+    }
+
     @MainActor func testInactiveTerminalNeverReceivesKeyboardInput() {
         _ = NSApplication.shared
         let feed = TerminalFeed()

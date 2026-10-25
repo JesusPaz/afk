@@ -32,12 +32,14 @@ The secure invitation expires in five minutes and works once. Saved device crede
 | ⌘K | Go to any terminal by name, folder, group or profile |
 | ⌘⌥↑ / ⌘⌥↓ | Previous / next terminal in sidebar order |
 | ⌘1 … ⌘9 | Jump to the Nth terminal |
+| ⌘⌥← / ⌘⌥→ | Previous / next profile |
 | ⌃⌘1 … ⌃⌘9 | Switch profile |
 | ⌘⇧L | Take or release typing control on the Mac |
 | ⌘, | Settings (live-session limit) |
 
 The toolbar **+** creates a session next to the selected one; hold it to create a
-group or profile. Pairing an iPhone lives in **Devices**.
+group or profile. **Saved history**, **Devices** (where you pair an iPhone) and
+**Connection** are the buttons above the sidebar.
 
 ## Typing and dictating from the iPhone
 
@@ -57,9 +59,10 @@ Choose a flat system symbol or a single emoji using the macOS character picker.
 Groups remain saved and visible even after their last session closes, including
 after restarting AFK; their shell processes are not restored.
 
-On Mac, use the profile tabs above the sidebar (or ⌃⌘1…9) to switch between
+On Mac, use the profile tabs in the toolbar (or ⌘⌥← / ⌘⌥→, ⌃⌘1…9) to switch between
 **Personal**, **Work**, and custom profiles created with **+ → New profile…** in the
-toolbar; beyond four profiles the tabs become a menu.
+toolbar; beyond four profiles the tabs become a menu. Switching back to a profile
+reopens the terminal you last used there.
 Each profile shows its own groups, ungrouped sessions, hidden sessions and ended
 sessions. Existing organization starts in Personal. New groups and sessions belong
 to the selected profile. Use **Move to profile** in a group or session's context
