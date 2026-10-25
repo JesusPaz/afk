@@ -29,6 +29,8 @@ The secure invitation expires in five minutes and works once. Saved device crede
 | Shortcut | Action |
 | --- | --- |
 | ⌘N | New session in the current group |
+| ⌘W | Close the selected session (asks first) |
+| ⇧⌘W | Close the window; sessions keep running |
 | ⌘K | Go to any terminal by name, folder, group or profile |
 | ⌘⌥↑ / ⌘⌥↓ | Previous / next terminal in sidebar order |
 | ⌘1 … ⌘9 | Jump to the Nth terminal |

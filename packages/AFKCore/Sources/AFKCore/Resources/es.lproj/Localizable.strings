@@ -480,6 +480,8 @@
 "Terminal siguiente" = "Terminal siguiente";
 "Perfil anterior" = "Perfil anterior";
 "Perfil siguiente" = "Perfil siguiente";
+"Cerrar sesión…" = "Cerrar sesión…";
+"Cerrar ventana" = "Cerrar ventana";
 "Busca por nombre, carpeta, grupo o perfil" = "Busca por nombre, carpeta, grupo o perfil";
 "Ninguna terminal coincide" = "Ninguna terminal coincide";
 "Nueva sesión junto a la actual (⌘N). Mantén pulsado para crear un grupo o perfil." = "Nueva sesión junto a la actual (⌘N). Mantén pulsado para crear un grupo o perfil.";
