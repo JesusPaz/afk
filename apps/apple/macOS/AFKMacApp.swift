@@ -83,6 +83,7 @@ private struct WorkspaceNavigation {
     let jump: (Int) -> Void
     let profiles: [String]
     let selectProfile: (Int) -> Void
+    let stepProfile: (Int) -> Void
     let quickOpen: () -> Void
 }
 private struct WorkspaceNavigationKey: FocusedValueKey {
@@ -112,6 +113,8 @@ private struct SessionWorkspaceCommands: Commands {
                     .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
             }
             Divider()
+            Button(L10n.text("Perfil anterior")) { workspace?.stepProfile(-1) }.keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+            Button(L10n.text("Perfil siguiente")) { workspace?.stepProfile(1) }.keyboardShortcut(.rightArrow, modifiers: [.command, .option])
             ForEach(Array((workspace?.profiles ?? []).prefix(9).enumerated()), id: \.offset) { index, name in
                 Button(name) { workspace?.selectProfile(index) }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command, .control])
@@ -160,6 +163,7 @@ struct MacWorkspace: View {
     @State private var emptyTitle: String?
     @State private var showingSwitcher = false
     @State private var pendingSelection: String?
+    @State private var lastSelection: [WorkspaceProfile: String] = [:]
 
     // Sidebar order: groups first, then ungrouped sessions.
     private var navigationOrder: [HostSession] {
@@ -188,6 +192,10 @@ struct MacWorkspace: View {
             jump: { index in if navigationOrder.indices.contains(index) { open(navigationOrder[index]) } },
             profiles: host.profiles.map(profileName),
             selectProfile: { index in if host.profiles.indices.contains(index) { profile = host.profiles[index] } },
+            stepProfile: { offset in
+                guard let current = host.profiles.firstIndex(of: profile) else { return }
+                profile = host.profiles[(current + offset + host.profiles.count) % host.profiles.count]
+            },
             quickOpen: { showingSwitcher = true })
     }
 
@@ -305,13 +313,16 @@ struct MacWorkspace: View {
                 }
             }
             .listStyle(.sidebar)
-            .safeAreaInset(edge: .top) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("AFK").font(.title2.weight(.semibold))
-                    // Tabs while they fit; ⌃⌘1…9 switch profiles either way.
-                    if host.profiles.count <= 4 { profilePicker.pickerStyle(.segmented).labelsHidden() }
-                    else { profilePicker.pickerStyle(.menu) }
-                }.padding(.horizontal, 16).padding(.vertical, 12)
+            .toolbar {
+                // Like Calendar's sidebar buttons: secondary places stay one click away.
+                ToolbarItemGroup {
+                    Button { showingHistory = true } label: { Label(L10n.text("Historial guardado"), systemImage: "clock") }
+                        .help(L10n.text("Historial guardado"))
+                    Button { sheet = .devices } label: { Label(L10n.text("Dispositivos"), systemImage: "iphone") }
+                        .help(L10n.text("Dispositivos"))
+                    Button { sheet = .server } label: { Label(L10n.text("Conexión"), systemImage: "network") }
+                        .help(L10n.text("Conexión"))
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -335,10 +346,6 @@ struct MacWorkspace: View {
                             }
                         }
                     }
-                    Divider()
-                    Button { showingHistory = true } label: { Label(L10n.text("Historial guardado"), systemImage: "clock") }
-                    Button { sheet = .devices } label: { Label(L10n.text("Dispositivos"), systemImage: "iphone") }
-                    Button { sheet = .server } label: { Label(L10n.text("Conexión"), systemImage: "network") }
                     RemoteAccessStatus(host: host, relay: host.relay).padding(.top, 4)
                 }.buttonStyle(.plain).padding(16).frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -368,6 +375,11 @@ struct MacWorkspace: View {
         .focusedSceneValue(\.workspace, navigation)
         .navigationTitle(host.sessions.first(where: { $0.id == selected })?.name ?? "AFK")
         .toolbar {
+            // Profiles switch the whole workspace, like Calendar's Day/Week/Month control.
+            ToolbarItem(placement: .principal) {
+                if host.profiles.count <= 4 { profilePicker.pickerStyle(.segmented).labelsHidden().fixedSize() }
+                else { profilePicker.pickerStyle(.menu).fixedSize() }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button(L10n.text("Nueva sesión")) { navigation.createSession() }
@@ -437,8 +449,14 @@ struct MacWorkspace: View {
         .onChange(of: host.sessions.map(\.id)) { _, next in
             if let selected, !next.contains(selected) { self.selected = nil }
         }
+        .onChange(of: selected) { _, next in
+            if let next { lastSelection[profile] = next }
+        }
         .onChange(of: profile) { _, _ in
-            selected = pendingSelection; pendingSelection = nil; emptyTitle = nil; lastHidden = nil; removedGroup = nil
+            // Come back to the terminal last used in this profile, or its first one.
+            let remembered = lastSelection[profile].flatMap { id in navigationOrder.first { $0.id == id } }
+            selected = pendingSelection ?? (remembered ?? navigationOrder.first)?.id
+            pendingSelection = nil; emptyTitle = nil; lastHidden = nil; removedGroup = nil
         }
     }
 

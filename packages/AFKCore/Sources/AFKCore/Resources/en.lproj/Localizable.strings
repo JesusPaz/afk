@@ -478,6 +478,8 @@
 "Ir a terminal…" = "Go to Terminal…";
 "Terminal anterior" = "Previous Terminal";
 "Terminal siguiente" = "Next Terminal";
+"Perfil anterior" = "Previous Profile";
+"Perfil siguiente" = "Next Profile";
 "Busca por nombre, carpeta, grupo o perfil" = "Search by name, folder, group or profile";
 "Ninguna terminal coincide" = "No terminal matches";
 "Nueva sesión junto a la actual (⌘N). Mantén pulsado para crear un grupo o perfil." = "New session next to the current one (⌘N). Hold to create a group or profile.";
