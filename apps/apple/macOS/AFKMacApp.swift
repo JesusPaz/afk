@@ -621,9 +621,6 @@ private struct MacSessionRow: View {
             SessionGroupMark(group: group).padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
                 Text(session.name).fontWeight(.medium).lineLimit(2)
-                if let context = session.context, !context.isEmpty {
-                    Text(context).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                }
                 HStack(spacing: 5) {
                     Text(session.closing ? L10n.text("Cerrando…") : !session.running ? L10n.text("Terminada") : session.lease.owner == "local" ? L10n.text("Escribiendo en este Mac") : session.lease.owner.isEmpty ? L10n.text("Solo lectura") : L10n.text("Control desde iPhone"))
                     if disambiguate { Text(String(session.id.prefix(4))).monospaced() }
