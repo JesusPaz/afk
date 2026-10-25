@@ -79,6 +79,7 @@ private struct MacSettings: View {
 
 private struct WorkspaceNavigation {
     let createSession: () -> Void
+    let closeSession: (() -> Void)?
     let step: (Int) -> Void
     let jump: (Int) -> Void
     let profiles: [String]
@@ -101,6 +102,14 @@ private struct SessionWorkspaceCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button(L10n.text("Nueva sesión")) { workspace?.createSession() }.keyboardShortcut("n")
                 .disabled(workspace == nil)
+        }
+        // ⌘W closes the terminal, like a tab in Terminal; the window moves to ⇧⌘W.
+        CommandGroup(replacing: .saveItem) {
+            // Without a selected session (Settings, empty profile) ⌘W still closes the window.
+            Button(L10n.text("Cerrar sesión…")) {
+                if let close = workspace?.closeSession { close() } else { NSApp.keyWindow?.performClose(nil) }
+            }.keyboardShortcut("w")
+            Button(L10n.text("Cerrar ventana")) { NSApp.keyWindow?.performClose(nil) }.keyboardShortcut("w", modifiers: [.command, .shift])
         }
         CommandMenu(L10n.text("Ir")) {
             Button(L10n.text("Ir a terminal…")) { workspace?.quickOpen() }.keyboardShortcut("k")
@@ -188,6 +197,7 @@ struct MacWorkspace: View {
     private var navigation: WorkspaceNavigation {
         WorkspaceNavigation(
             createSession: { createSession(groupID: host.sessions.first { $0.id == selected }?.groupID) },
+            closeSession: profileSessions.first { $0.id == selected }.map { session in { requestClose(session) } },
             step: step,
             jump: { index in if navigationOrder.indices.contains(index) { open(navigationOrder[index]) } },
             profiles: host.profiles.map(profileName),
@@ -510,13 +520,12 @@ struct MacWorkspace: View {
         Button(L10n.text("Permisos de la sesión…")) { permissionSession = session; sheet = .permissions }
             .accessibilityIdentifier("session-permissions")
         Divider()
-        if session.closing {
-            Button(L10n.text("Forzar cierre…"), role: .destructive) { forceClosing = true; closingSession = session }
-        } else if session.running {
-            Button(L10n.text("Cerrar y quitar…"), role: .destructive) { forceClosing = false; closingSession = session }
-        } else {
-            Button(L10n.text("Quitar de la lista")) { forceClosing = false; remove(session) }
-        }
+        Button(session.closing ? L10n.text("Forzar cierre…") : session.running ? L10n.text("Cerrar y quitar…") : L10n.text("Quitar de la lista"),
+               role: session.closing || session.running ? .destructive : nil) { requestClose(session) }
+    }
+    private func requestClose(_ session: HostSession) {
+        forceClosing = session.closing
+        if session.closing || session.running { closingSession = session } else { remove(session) }
     }
     @ViewBuilder private func groupActions(_ group: SessionGroup) -> some View {
         Button(L10n.text("Nueva sesión en este grupo")) { createSession(groupID: group.id) }
