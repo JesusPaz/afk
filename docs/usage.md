@@ -40,8 +40,9 @@ The secure invitation expires in five minutes and works once. Saved device crede
 | ⌘, | Settings (live-session limit) |
 
 The toolbar **+** creates a session next to the selected one; hold it to create a
-group or profile. **Saved history**, **Devices** (where you pair an iPhone) and
-**Connection** are the buttons above the sidebar.
+group or profile. **Saved history** and **Devices** (where you pair an iPhone) are
+the buttons above the sidebar; click the remote access status at its bottom for
+**Connection**.
 
 ## Typing and dictating from the iPhone
 
@@ -71,9 +72,9 @@ to the selected profile. Use **Move to profile** in a group or session's context
 menu; moving a group includes its sessions, while moving a single session removes
 it from its old group. Switching profiles clears the selected terminal and keeps
 all shells and renderers running without changing typing control.
-Drag sessions onto a group header or another session in that group to move them.
-Drop onto **Ungrouped** to remove their group; this destination stays visible even
-when empty. Profile names, group assignments and the selected profile survive app
+Ungrouped sessions sit at the top of the sidebar, before the groups. Drag sessions
+onto a group header or another session in that group to move them; drop them on an
+ungrouped session or on empty sidebar space to remove their group. Profile names, group assignments and the selected profile survive app
 relaunch; shells do not.
 Restoring a terminal recording yields between bounded batches and shows progress;
 input remains disabled until restoration completes. An unavailable history archive

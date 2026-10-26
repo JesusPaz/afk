@@ -119,6 +119,13 @@ final class SessionOrganizationTests: XCTestCase {
         XCTAssertEqual(session.name, "Investiga")
         session.screen?.append(Data("\u{1b}]0;A | B\u{7}".utf8))
         XCTAssertEqual(session.name, "A | B")
+        for spinner in ["✳", "✶", "·", "◐", "⠋"] {
+            session.screen?.append(Data("\u{1b}]0;\(spinner) Claude Code\u{7}".utf8))
+            XCTAssertEqual(session.name, spinner + " Claude Code")
+            XCTAssertEqual(session.windowTitle, "Claude Code")
+        }
+        session.screen?.append(Data("\u{1b}]0;~ notes\u{7}".utf8))
+        XCTAssertEqual(session.windowTitle, "~ notes")
         XCTAssertEqual(SessionMetadata.clean("\u{202e}name\n\u{7}"), "name")
         XCTAssertEqual(SessionMetadata.clean(String(repeating: "x", count: 9000))?.count, 120)
     }

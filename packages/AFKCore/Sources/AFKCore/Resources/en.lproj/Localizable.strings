@@ -469,7 +469,6 @@
 "Nuevo perfil…" = "New profile…";
 "Nombre" = "Name";
 "Crear" = "Create";
-"Arrastra aquí para sacar del grupo" = "Drop here to remove from group";
 "La entrada es demasiado grande. No se envió; pega un bloque más pequeño." = "The input is too large. Nothing was sent; paste a smaller block.";
 "No se pudo enviar toda la entrada. Revisa la terminal antes de continuar." = "Not all input could be sent. Check the terminal before continuing.";
 "Recuperando historial…" = "Restoring history…";

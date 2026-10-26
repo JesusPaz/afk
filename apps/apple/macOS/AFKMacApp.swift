@@ -174,9 +174,9 @@ struct MacWorkspace: View {
     @State private var pendingSelection: String?
     @State private var lastSelection: [WorkspaceProfile: String] = [:]
 
-    // Sidebar order: groups first, then ungrouped sessions.
+    // Sidebar order: ungrouped sessions first, then groups.
     private var navigationOrder: [HostSession] {
-        profileGroups.flatMap { visible(groupID: $0.id) } + visible(groupID: nil)
+        visible(groupID: nil) + profileGroups.flatMap { visible(groupID: $0.id) }
     }
     private func open(_ session: HostSession) {
         expand(session.groupID)
@@ -252,6 +252,8 @@ struct MacWorkspace: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selected) {
+                // Like Reminders: loose items sit at the top without a header.
+                ForEach(visible(groupID: nil)) { session in sessionRow(session) }
                 ForEach(profileGroups) { group in
                     DisclosureGroup(isExpanded: Binding(
                         get: { !collapsedGroups.contains(group.id) },
@@ -271,7 +273,9 @@ struct MacWorkspace: View {
                             SessionGroupMark(group: group)
                             Text(group.name).lineLimit(1)
                             Spacer(minLength: 2)
-                            Text(visible(groupID: group.id).count.formatted()).foregroundStyle(.secondary).font(.caption.monospacedDigit())
+                            if collapsedGroups.contains(group.id) {
+                                Text(visible(groupID: group.id).count.formatted()).foregroundStyle(.secondary).font(.caption.monospacedDigit())
+                            }
                         }
                         .contentShape(Rectangle())
                         .padding(.vertical, 3).padding(.horizontal, 4)
@@ -281,27 +285,6 @@ struct MacWorkspace: View {
                         } isTargeted: { targetedGroup = $0 ? group.id : nil }
                         .contextMenu { groupActions(group) }
                     }
-                }
-                Section {
-                    ForEach(visible(groupID: nil)) { session in sessionRow(session) }
-                    if visible(groupID: nil).isEmpty {
-                        Text(L10n.text("Arrastra aquí para sacar del grupo"))
-                            .font(.caption).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .dropDestination(for: SessionDrag.self) { items, _ in
-                                drop(items, into: nil)
-                            } isTargeted: { targetedGroup = $0 ? "ungrouped" : nil }
-                    }
-                } header: {
-                    Text(L10n.text("Sin grupo"))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .padding(.vertical, 3).padding(.horizontal, 4)
-                        .background(dropHighlight(targetedGroup == "ungrouped"))
-                        .dropDestination(for: SessionDrag.self) { items, _ in
-                            drop(items, into: nil)
-                        } isTargeted: { targetedGroup = $0 ? "ungrouped" : nil }
                 }
                 if !hidden.isEmpty {
                     DisclosureGroup(isExpanded: $showingHidden) {
@@ -323,6 +306,11 @@ struct MacWorkspace: View {
                 }
             }
             .listStyle(.sidebar)
+            // Dropping on empty sidebar space takes a session out of its group.
+            .dropDestination(for: SessionDrag.self) { items, _ in
+                drop(items, into: nil)
+            } isTargeted: { targetedGroup = $0 ? "ungrouped" : nil }
+            .overlay { dropHighlight(targetedGroup == "ungrouped").padding(4).allowsHitTesting(false) }
             .toolbar {
                 // Like Calendar's sidebar buttons: secondary places stay one click away.
                 ToolbarItemGroup {
@@ -330,8 +318,6 @@ struct MacWorkspace: View {
                         .help(L10n.text("Historial guardado"))
                     Button { sheet = .devices } label: { Label(L10n.text("Dispositivos"), systemImage: "iphone") }
                         .help(L10n.text("Dispositivos"))
-                    Button { sheet = .server } label: { Label(L10n.text("Conexión"), systemImage: "network") }
-                        .help(L10n.text("Conexión"))
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -356,7 +342,9 @@ struct MacWorkspace: View {
                             }
                         }
                     }
-                    RemoteAccessStatus(host: host, relay: host.relay).padding(.top, 4)
+                    // The status opens its own settings, so the toolbar keeps two buttons and never overflows.
+                    Button { sheet = .server } label: { RemoteAccessStatus(host: host, relay: host.relay) }
+                        .help(L10n.text("Conexión")).padding(.top, 4)
                 }.buttonStyle(.plain).padding(16).frame(maxWidth: .infinity, alignment: .leading)
             }
             .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
@@ -383,7 +371,7 @@ struct MacWorkspace: View {
             }
         }
         .focusedSceneValue(\.workspace, navigation)
-        .navigationTitle(host.sessions.first(where: { $0.id == selected })?.name ?? "AFK")
+        .navigationTitle(host.sessions.first(where: { $0.id == selected })?.windowTitle ?? "AFK")
         .toolbar {
             // Profiles switch the whole workspace, like Calendar's Day/Week/Month control.
             ToolbarItem(placement: .principal) {

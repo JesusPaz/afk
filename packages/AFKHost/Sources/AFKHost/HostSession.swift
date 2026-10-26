@@ -29,6 +29,14 @@ public final class HostSession: ObservableObject, Identifiable {
     @Published public private(set) var closing = false
     @Published public private(set) var inputError: String?
     public var name: String { userLabel ?? shownTitle ?? context ?? "Terminal · " + id.prefix(4).uppercased() }
+    // Claude Code and other TUIs animate a spinner glyph at the start of their title. Keep it in the
+    // sidebar as an activity cue, but not in the window title: every frame would relayout the toolbar.
+    public var windowTitle: String {
+        let title = name
+        guard let first = title.unicodeScalars.first, title.dropFirst().first == " ",
+              first.properties.generalCategory == .otherSymbol || first == "\u{B7}" else { return title }
+        return String(title.dropFirst(2))
+    }
     // Codex appends " | <directory>" to its title; the context already says where the shell is.
     private var shownTitle: String? {
         guard let title = reportedTitle, let separator = title.range(of: " | ", options: .backwards) else { return reportedTitle }
