@@ -1,3 +1,7 @@
 "NSLocalNetworkUsageDescription" = "AFK se conecta al relay que elegiste para compartir la terminal de tu Mac.";
 
 "NSCameraUsageDescription" = "AFK usa la cámara para escanear el QR de vinculación de tu Mac.";
+
+"NSMicrophoneUsageDescription" = "AFK solo escucha mientras dictas un comando para la terminal de tu Mac.";
+
+"NSSpeechRecognitionUsageDescription" = "AFK convierte tu dictado en texto para la terminal de tu Mac, en el propio iPhone cuando el idioma lo permite.";

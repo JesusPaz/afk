@@ -208,13 +208,16 @@ its existing independent epoch/sequence/acknowledgement protocol.
 On a backward scroll, `historyPage` supplies `viewportID`, a fresh `requestID` and an
 exclusive `historyBefore` row. A forward scroll instead supplies inclusive
 `historyStart`. The reply echoes both IDs and returns `[historyStart, historyBefore)`
-plus `historyRows`. Rows and index offsets stay on disk on the Mac. Each page is
-bounded to 64 rows / 64 KiB, including colored output. The phone requests one foreground page at a time without an artificial delay,
-and prefetches one adjacent page after a foreground response or cache hit. Background
-responses only populate the cache and never move the visible window or recursively
-fetch the whole archive. Superseded background responses are ignored by request ID.
-The rendered window retains at most 256 old rows; a separate FIFO cache holds at most
-4096 rows / 1 MiB of UTF-8 row data plus a 16-byte allowance per row (object and
+plus `historyRows`. Rows and index offsets stay on disk on the Mac. The request's
+`historyLimit` asks for up to 256 rows; without it the Mac answers with the original
+64. Each page is also bounded to 192 KiB of encoded rows, including colored output,
+which keeps it inside the 512 KiB application packet. The phone requests one foreground page at a time without an artificial delay,
+and keeps one background request at a time running until 2048 rows (eight pages) are
+cached ahead of the reader in the direction being read; a cache hit never cancels it.
+Background responses only populate the cache and never move the visible window or
+fetch beyond that bound. Superseded background responses are ignored by request ID.
+The rendered window retains at most 768 old rows; a separate FIFO cache holds at most
+8192 rows / 4 MiB of UTF-8 row data plus a 16-byte allowance per row (object and
 dictionary overhead are additional). Returning to live retains that cache within
 the current attachment; changing sessions or reconnecting does not reuse it. Visible-row anchoring
 prevents prepends and live output from moving the reader's position. Taking control

@@ -46,11 +46,27 @@ the buttons above the sidebar; click the remote access status at its bottom for
 
 ## Typing and dictating from the iPhone
 
-While the iPhone has control, a text field sits above Esc / Tab / Ctrl+C. Type or
-use iOS dictation there: each edit appears on the Mac's terminal line as you speak,
-including corrections, and **Send** presses Enter. Using a special key or typing in
-the terminal itself hands the line back to the terminal. Smart quotes and dashes are
-converted to plain ASCII. See [dictation behavior and validation](dictation.md).
+A session opens with the terminal filling the screen and the keyboard hidden. Status,
+control expiry and **Switch to read-only** live in the **…** menu; notices float over
+the terminal and can be dismissed. Without control, one bar at the bottom shows the
+state and **Type from here** (or **Back to live** while reading history).
+
+While the iPhone has control, a single bar holds the keyboard toggle, the microphone,
+Esc, Tab, ^C, a **Ctrl** menu (Ctrl+C/D/Z/L/R/A/E/U/W/K, ⇧Tab and `/clear`, `/compact`,
+`/resume` for agents), the arrows and Enter. Tapping the terminal or the keyboard
+button opens a text field above the bar; tapping the button again or swiping the bar
+down puts the keyboard away. While typing or dictating, the navigation and status bars
+hide so only the terminal and the input remain.
+
+Type or use iOS dictation in that field: each edit appears on the Mac's terminal line
+as you speak, including corrections, and Enter runs it. The microphone button dictates
+without opening the keyboard; partial results replace the text live, on the iPhone
+when the language supports on-device recognition (otherwise Apple's speech service).
+Tap it again to stop; any key or Enter ends dictation and no late result is typed.
+Using a special key hands the line back to the terminal. Smart quotes and dashes are
+converted to plain ASCII. Pinch the terminal to change the font size; a smaller font
+offers more columns when the iPhone controls the size. See
+[dictation behavior and validation](dictation.md).
 
 ## Sessions, groups and profiles
 
@@ -140,9 +156,11 @@ no separate history menu and opening a session does not download its full record
 In alternate-screen applications such as Codex, history belongs to the application:
 while controlling the session, a vertical drag sends wheel events just like the Mac.
 Take control with **Type from here** to browse that application-owned history.
-Pages for normal shell history contain at most 64 rows / 64 KiB. The phone prefetches
-one page after showing the current screen and keeps a bounded in-memory cache for
-the current attachment, including when returning to live. It renders at most 256
+Pages for normal shell history contain at most 256 rows / 192 KiB (older iPhones keep
+64-row pages). Right after showing the current screen the phone keeps fetching pages in
+the background until about 2048 rows are buffered ahead, and tops that buffer up as
+you scroll, so most scrolling reads rows already on the phone. The cache is bounded and
+lasts for the current attachment, including when returning to live. It renders at most 768
 historical rows plus the current screen; leaving the session clears the cache. Scrolling forward fetches newer pages and returns to live
 output. New output does not move the row being read. Choosing **Type from here**
 returns to the current screen before enabling input.

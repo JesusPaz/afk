@@ -30,6 +30,8 @@ public struct Message: Codable {
     public var historyRows: [TerminalRow]?
     public var historyStart: UInt64?
     public var historyBefore: UInt64?
+    /// Rows a phone accepts per history page; absent means the original 64-row pages.
+    public var historyLimit: Int?
     public var requestID: String?
     public var historyOffset: UInt64?
     public var historyLength: UInt64?

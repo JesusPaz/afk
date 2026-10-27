@@ -9,7 +9,68 @@ private final class HistoryPan: UIPanGestureRecognizer {
     override func translation(in view: UIView?) -> CGPoint { motion }
 }
 
+private final class FlickPan: UIPanGestureRecognizer {
+    var motion = CGPoint.zero
+    var speed = CGPoint.zero
+    override var state: UIGestureRecognizer.State { get { .ended } set {} }
+    override func translation(in view: UIView?) -> CGPoint { motion }
+    override func velocity(in view: UIView?) -> CGPoint { speed }
+}
+
 @MainActor final class PhoneHistoryScrollTests: XCTestCase {
+    func testTappingTheTerminalAsksForTheInputBarInsteadOfItsOwnKeyboard() throws {
+        let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let coordinator = TerminalCoordinator(feed: TerminalFeed(), editable: false, input: { _ in }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        var requests = 0
+        coordinator.keyboardRequested = { requests += 1 }
+        XCTAssertFalse(container.terminal.becomeFirstResponder())
+        XCTAssertEqual(requests, 0, "A read-only phone has no input bar to open")
+        coordinator.editable = true
+        XCTAssertFalse(container.terminal.becomeFirstResponder())
+        XCTAssertFalse(container.terminal.isFirstResponder)
+        XCTAssertEqual(requests, 1)
+    }
+
+    func testFontSizeChangesKeepTheMacGridAndItsText() throws {
+        let feed = TerminalFeed()
+        let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let coordinator = TerminalCoordinator(feed: feed, editable: false, input: { _ in }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        var proposals: [TerminalSize] = []
+        container.viewportChanged = { proposals.append($0) }
+        feed.present([TerminalEvent(size: TerminalSize(columns: 100, rows: 30)), TerminalEvent(data: Data("first line\r\nsecond".utf8))],
+                     sequence: 1, start: 0, following: true)
+        let width = container.terminal.frame.width
+        container.setFontSize(10)
+        container.layoutIfNeeded()
+        let grid = container.terminal.getTerminal()
+        XCTAssertEqual(grid.cols, 100); XCTAssertEqual(grid.rows, 30)
+        XCTAssertEqual(grid.getLine(row: 0)?.translateToString(trimRight: true), "first line")
+        XCTAssertLessThan(container.terminal.frame.width, width)
+        XCTAssertGreaterThan(proposals.last?.columns ?? 0, 50, "A smaller font offers more columns to the Mac")
+        container.setFontSize(200)
+        XCTAssertEqual(container.terminal.font.pointSize, TerminalContainer.fontSizes.upperBound)
+    }
+
+    func testFlickKeepsScrollingApplicationHistoryAfterTheFingerLifts() async throws {
+        let feed = TerminalFeed()
+        let container = TerminalContainer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let coordinator = TerminalCoordinator(feed: feed, editable: true, input: { _ in }, resize: { _ in })
+        coordinator.attach(container)
+        defer { coordinator.detach() }
+        feed.present([], sequence: 1, start: 0, following: true)
+        var steps: [Int] = []
+        feed.onApplicationScroll = { if $0 != 0 { steps.append($0) }; return true }
+        let pan = FlickPan(); container.terminal.addGestureRecognizer(pan)
+        pan.motion.y = 48; pan.speed.y = 3000
+        coordinator.historyPan(pan)
+        try await Task.sleep(for: .milliseconds(120))
+        XCTAssertEqual(steps.reduce(0, +), 22, "Two dragged lines plus twenty from the flick")
+    }
+
     func testTallLiveScreenStaysAtBottomWhenNewOutputArrives() throws {
         let feed = TerminalFeed()
         let scrollback = RemoteScrollback(feed: feed)

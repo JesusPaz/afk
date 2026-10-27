@@ -49,6 +49,9 @@ public final class TerminalRowStore {
         rows = try open("scrollback.rows"); index = try open("scrollback.index")
     }
     deinit { try? rows.close(); try? index.close() }
+    /// Upper bounds for one history page, well inside the 512 KiB secure message limit.
+    public static let pageRows = 256
+    public static let pageBytes = 192 * 1024
     public func append(_ row: TerminalRow) throws {
         let data = try JSONEncoder().encode(row)
         guard data.count <= 64 * 1024 else { throw CocoaError(.fileWriteUnknown) }
@@ -62,10 +65,10 @@ public final class TerminalRowStore {
     public func page(after: UInt64, limit: Int = 64) throws -> (start: UInt64, rows: [TerminalRow]) {
         guard after <= count else { throw CocoaError(.fileReadCorruptFile) }
         var cursor = after, result: [TerminalRow] = [], bytes = 0
-        while cursor < count && result.count < min(64, max(1, limit)) && bytes < 64 * 1024 {
+        while cursor < count && result.count < min(Self.pageRows, max(1, limit)) && bytes < Self.pageBytes {
             let row = try page(before: cursor + 1, limit: 1).rows[0]
             let size = try JSONEncoder().encode(row).count
-            if !result.isEmpty && bytes + size > 64 * 1024 { break }
+            if !result.isEmpty && bytes + size > Self.pageBytes { break }
             result.append(row); bytes += size; cursor += 1
         }
         return (after, result)
@@ -74,7 +77,7 @@ public final class TerminalRowStore {
     public func page(before: UInt64, limit: Int = 64) throws -> (start: UInt64, rows: [TerminalRow]) {
         guard before <= count else { throw CocoaError(.fileReadCorruptFile) }
         var cursor = before, result: [TerminalRow] = [], bytes = 0
-        while cursor > 0 && result.count < min(64, max(1, limit)) && bytes < 64 * 1024 {
+        while cursor > 0 && result.count < min(Self.pageRows, max(1, limit)) && bytes < Self.pageBytes {
             cursor -= 1
             try index.seek(toOffset: cursor * 8)
             guard let entry = try index.read(upToCount: 8), entry.count == 8 else { throw CocoaError(.fileReadCorruptFile) }
@@ -85,7 +88,7 @@ public final class TerminalRowStore {
             guard length <= 64 * 1024, let data = try rows.read(upToCount: Int(length)), data.count == Int(length) else {
                 throw CocoaError(.fileReadCorruptFile)
             }
-            if !result.isEmpty && bytes + data.count > 64 * 1024 { cursor += 1; break }
+            if !result.isEmpty && bytes + data.count > Self.pageBytes { cursor += 1; break }
             result.append(try JSONDecoder().decode(TerminalRow.self, from: data)); bytes += data.count
         }
         return (cursor, result.reversed())

@@ -136,6 +136,10 @@ final class RemoteModel: ObservableObject {
     var canClaim: Bool { selectedInfo?.closing != true && ready && inputAcknowledgements && selectedInfo?.canControl == true }
     var canTerminate: Bool { selectedInfo.map(canCloseSession) ?? false }
     var canWrite: Bool { canClaim && !scrollback.browsing && owner == credentials?.clientID }
+    var ownsControl: Bool { !owner.isEmpty && owner == credentials?.clientID }
+    var browsingHistory: Bool { scrollback.browsing }
+    /// Leaves history without re-claiming, so a phone that already types keeps its lease.
+    func returnToLive() { scrollback.returnToLive(); loadingHistory = false; objectWillChange.send() }
     private func clearTerminal() {
         if inputBuffer.hasPendingInput { sessionNotice = L10n.text("Hay entrada sin confirmar. Revisa la terminal antes de volver a escribir.") }
         cancelInput()
@@ -347,10 +351,10 @@ final class RemoteModel: ObservableObject {
             sessionNotice = L10n.text("El historial no está disponible. La pantalla en vivo sigue conectada.")
         case "historyPage":
             guard m.sessionID == selected, let id = viewportID, m.viewportID == id else { return }
-            let foreground = scrollback.waitingForHistory
             let older = scrollback.pending?.older ?? true
             if scrollback.accept(m) {
-                if foreground { sendHistory(scrollback.prefetch(older: older)) }
+                // Keep filling the buffer in the same direction until it holds enough rows.
+                sendHistory(scrollback.prefetch(older: older))
                 loadingHistory = scrollback.waitingForHistory; objectWillChange.send()
             }
         case "terminalResponse":

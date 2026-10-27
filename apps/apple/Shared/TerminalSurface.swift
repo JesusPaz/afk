@@ -54,6 +54,13 @@ private final class TerminalStage: NSView {
 }
 #else
 typealias PlatformView = UIView
+
+/// The phone types through its native input bar, which keeps iOS dictation reliable.
+/// A tap on the terminal asks for that bar instead of SwiftTerm's own keyboard.
+final class PhoneTerminalView: TerminalView {
+    var keyboardRequested: (() -> Void)?
+    override func becomeFirstResponder() -> Bool { keyboardRequested?(); return false }
+}
 #endif
 
 /// The renderer keeps the authoritative grid. Only the surrounding viewport proposes sizes.
@@ -73,24 +80,24 @@ final class TerminalContainer: PlatformView {
     override var isFlipped: Bool { true }
     #else
     private let scroll = UIScrollView()
+    static let fontSizeKey = "terminalFontSize"
+    static let fontSizes: ClosedRange<CGFloat> = 8...22
+    private var pinchStart: CGFloat = 0
     #endif
 
     override init(frame: CGRect) {
         #if os(macOS)
         terminal = FileDropTerminalView(frame: .zero, font: AFKStyle.terminalFont)
         #else
-        terminal = TerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: AFKStyle.terminalFontSize, weight: .regular))
+        let saved = UserDefaults.standard.object(forKey: Self.fontSizeKey) as? Double
+        let size = saved.map { min(Self.fontSizes.upperBound, max(Self.fontSizes.lowerBound, CGFloat($0))) } ?? AFKStyle.terminalFontSize
+        terminal = PhoneTerminalView(frame: .zero, font: .monospacedSystemFont(ofSize: size, weight: .regular))
         #endif
         super.init(frame: frame)
         terminal.nativeBackgroundColor = .init(AFKStyle.terminalBackground)
         terminal.nativeForegroundColor = .init(AFKStyle.terminalForeground)
         // Measure the library's actual cell metrics before any session data is rendered.
-        terminal.resize(cols: 80, rows: 24)
-        let first = terminal.getOptimalFrameSize().size
-        terminal.resize(cols: 81, rows: 24)
-        cell = CGSize(width: terminal.getOptimalFrameSize().width - first.width, height: first.height / 24)
-        extraWidth = first.width - 80 * cell.width
-        terminal.resize(cols: 80, rows: 24)
+        (cell, extraWidth) = Self.measure(terminal)
         terminal.getTerminal().changeScrollback(10_000)
         addSubview(scroll)
         #if os(macOS)
@@ -112,10 +119,21 @@ final class TerminalContainer: PlatformView {
         #else
         scroll.addSubview(terminal)
         scroll.contentInsetAdjustmentBehavior = .never
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
+        pinch.delegate = self
+        addGestureRecognizer(pinch)
         #endif
         fitRenderer()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    private static func measure(_ view: TerminalView) -> (cell: CGSize, extraWidth: CGFloat) {
+        view.resize(cols: 80, rows: 24)
+        let first = view.getOptimalFrameSize().size
+        view.resize(cols: 81, rows: 24)
+        let cell = CGSize(width: view.getOptimalFrameSize().width - first.width, height: first.height / 24)
+        view.resize(cols: 80, rows: 24)
+        return (cell, first.width - 80 * cell.width)
+    }
     func fitRenderer() {
         var frame = terminal.getOptimalFrameSize()
         // Avoid floating-point truncation losing a column during native layout.
@@ -129,6 +147,30 @@ final class TerminalContainer: PlatformView {
         #endif
     }
     #if os(iOS)
+    /// Changes only the phone's rendering; the grid keeps the Mac's size until the phone resizes it.
+    func setFontSize(_ size: CGFloat) {
+        let size = min(Self.fontSizes.upperBound, max(Self.fontSizes.lowerBound, size.rounded()))
+        guard size != terminal.font.pointSize else { return }
+        let font = UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        (cell, extraWidth) = Self.measure(TerminalView(frame: .zero, font: font))
+        let grid = terminal.getTerminal()
+        let columns = grid.cols, rows = grid.rows
+        // Size the frame for the same grid first so SwiftTerm's font change does not reflow it.
+        terminal.frame.size = CGSize(width: CGFloat(columns) * cell.width + extraWidth + 0.01, height: CGFloat(rows) * cell.height + 0.01)
+        terminal.font = font
+        if grid.cols != columns || grid.rows != rows { terminal.resize(cols: columns, rows: rows) }
+        fitRenderer()
+        if followingLatest { revealLatestRows() }
+        setNeedsLayout()
+    }
+    @objc private func pinched(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began: pinchStart = terminal.font.pointSize
+        case .changed: setFontSize(pinchStart * gesture.scale)
+        case .ended: UserDefaults.standard.set(Double(terminal.font.pointSize), forKey: Self.fontSizeKey)
+        default: break
+        }
+    }
     var followingLatest = false
     func revealLatestRows() {
         // An observer can receive a Mac grid taller than the phone. SwiftTerm's
@@ -176,12 +218,21 @@ final class TerminalContainer: PlatformView {
     #endif
 }
 
+#if os(iOS)
+extension TerminalContainer: UIGestureRecognizerDelegate {
+    // Two fingers also start the terminal's pan; both must see the pinch.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+}
+#endif
+
 @MainActor
 final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate {
     let feed: TerminalFeed
     var input: (Data) -> Void
     var resize: (TerminalSize) -> Void
     var editable: Bool
+    var keyboardRequested: (() -> Void)?
     var observation: UUID?
     private var replaying = false
     private var attaching = false
@@ -239,6 +290,10 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
         #if os(iOS)
         view.alwaysBounceVertical = true
         view.panGestureRecognizer.addTarget(self, action: #selector(historyPan(_:)))
+        (view as? PhoneTerminalView)?.keyboardRequested = { [weak self] in
+            guard let self, self.active, self.editable else { return }
+            self.keyboardRequested?()
+        }
         #endif
         container.viewportChanged = { [weak self] size in
             guard let self, size != self.proposed else { return }
@@ -319,10 +374,14 @@ final class TerminalCoordinator: NSObject, @preconcurrency TerminalViewDelegate 
         if feed.onApplicationScroll?(0) == true {
             scrollTranslation += CGFloat(lines) * 24
             queueApplicationScroll(lines)
+            // Application history has no UIKit momentum, so a flick carries on as extra wheel steps.
+            if gesture.state == .ended { queueApplicationScroll(Int(gesture.velocity(in: view).y / 150)) }
             return
         }
-        if motion.y > 0 && view.contentOffset.y < 40 { feed.onHistoryEdge?(true) }
-        if motion.y < 0 && view.contentOffset.y + view.bounds.height >= view.contentSize.height - 40 { feed.onHistoryEdge?(false) }
+        // Ask for the next page while a couple of screens remain, not at the very edge.
+        let margin = view.bounds.height * 2
+        if motion.y > 0 && view.contentOffset.y < margin { feed.onHistoryEdge?(true) }
+        if motion.y < 0 && view.contentOffset.y + view.bounds.height >= view.contentSize.height - margin { feed.onHistoryEdge?(false) }
     }
     #endif
     func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {}
@@ -372,14 +431,16 @@ struct TerminalSurface: UIViewRepresentable {
     let input: (Data) -> Void
     let resize: (TerminalSize) -> Void
     var active = true
+    var keyboardRequested: (() -> Void)?
     func makeCoordinator() -> TerminalCoordinator { TerminalCoordinator(feed: feed, editable: editable, input: input, resize: resize) }
     func makeUIView(context: Context) -> TerminalContainer {
         let view = TerminalContainer(frame: .zero)
         context.coordinator.active = active
+        context.coordinator.keyboardRequested = keyboardRequested
         context.coordinator.attach(view); return view
     }
     func updateUIView(_ view: TerminalContainer, context: Context) {
-        context.coordinator.active = active
+        context.coordinator.active = active; context.coordinator.keyboardRequested = keyboardRequested
         context.coordinator.editable = editable; context.coordinator.input = input; context.coordinator.resize = resize
         if (!active || !editable) && view.terminal.isFirstResponder { _ = view.terminal.resignFirstResponder() }
     }

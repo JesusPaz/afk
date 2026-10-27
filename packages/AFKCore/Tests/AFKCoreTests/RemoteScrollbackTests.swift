@@ -17,21 +17,23 @@ import XCTest
         let state = RemoteScrollback(feed: TerminalFeed())
         state.update(viewport(count: 1_000_000))
         XCTAssertNil(state.pending); XCTAssertTrue(state.rows.isEmpty); XCTAssertFalse(state.browsing)
-        for n in 0..<10 {
+        // Enough pages to overflow the rendered window, so forward scrolling must use the cache.
+        for n in 0..<20 {
             let end = UInt64(1_000_000 - 64 * n)
             let request = try XCTUnwrap(state.request(older: true))
             XCTAssertEqual(request.historyBefore, end)
             XCTAssertNil(state.request(older: true), "Only one request may be outstanding")
+            XCTAssertEqual(request.historyLimit, RemoteScrollback.pageRows)
             XCTAssertTrue(state.accept(page(request, first: end - 64, last: end)))
-            XCTAssertLessThanOrEqual(state.rows.count, 256)
+            XCTAssertLessThanOrEqual(state.rows.count, RemoteScrollback.windowRows)
         }
         let start = state.start, rows = state.rows
         state.update(viewport(count: 1_000_100, sequence: 2))
         XCTAssertEqual(state.start, start); XCTAssertEqual(state.rows, rows)
         let end = state.end
         XCTAssertNil(state.request(older: false), "Recently visited rows come from cache")
-        XCTAssertEqual(state.end, end + 64)
-        XCTAssertLessThanOrEqual(state.rows.count, 256)
+        XCTAssertEqual(state.end, end + UInt64(RemoteScrollback.pageRows))
+        XCTAssertLessThanOrEqual(state.rows.count, RemoteScrollback.windowRows)
     }
     func testStalePagesCannotPopulateNewSessionAndReturningToLiveNeedsNoReplay() throws {
         let state = RemoteScrollback(feed: TerminalFeed())
@@ -97,9 +99,9 @@ import XCTest
             var reply = page(request, first: end > 64 ? end - 64 : 0, last: end)
             reply.historyRows = reply.historyRows?.map { TerminalRow(ansi: String(repeating: "x", count: 900), columns: $0.columns) }
             XCTAssertTrue(state.accept(reply))
-            XCTAssertLessThanOrEqual(state.cachedRowCount, 4096)
-            XCTAssertLessThanOrEqual(state.cachedBytes, 1024 * 1024)
-            XCTAssertLessThanOrEqual(state.rows.count, 256)
+            XCTAssertLessThanOrEqual(state.cachedRowCount, RemoteScrollback.cacheRows)
+            XCTAssertLessThanOrEqual(state.cachedBytes, RemoteScrollback.cacheBytes)
+            XCTAssertLessThanOrEqual(state.rows.count, RemoteScrollback.windowRows)
             if end <= 64 { break }
         }
     }
@@ -133,5 +135,49 @@ import XCTest
         XCTAssertEqual(next.start, 20); XCTAssertEqual(next.rows.first?.ansi, "line 20")
         XCTAssertEqual(next.rows.count, 64)
         XCTAssertThrowsError(try store.page(before: 10_001))
+        let large = try store.page(before: store.count, limit: 10_000)
+        XCTAssertEqual(large.rows.count, TerminalRowStore.pageRows)
+        XCTAssertEqual(try store.page(after: 0, limit: 10_000).rows.count, TerminalRowStore.pageRows)
+    }
+    func testLargePagesStayWithinTheirByteBound() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try TerminalRowStore(directory: root)
+        let colored = String(repeating: "\u{1b}[38;5;196mx", count: 200)
+        for _ in 0..<300 { try store.append(TerminalRow(ansi: colored, columns: 200)) }
+        let page = try store.page(before: store.count, limit: TerminalRowStore.pageRows)
+        XCTAssertLessThan(page.rows.count, TerminalRowStore.pageRows)
+        var reply = Message("historyPage"); reply.historyRows = page.rows
+        XCTAssertLessThan(try JSONEncoder().encode(reply).count, 512 * 1024)
+    }
+    func testOpeningBuffersSeveralPagesAheadWithoutScrolling() throws {
+        let state = RemoteScrollback(feed: TerminalFeed())
+        state.update(viewport(count: 100_000))
+        var cursor: UInt64 = 100_000, fetched = 0
+        while let request = state.prefetch() {
+            XCTAssertEqual(request.historyBefore, cursor, "Each page continues where the buffer ends")
+            let rows = UInt64(RemoteScrollback.pageRows)
+            XCTAssertTrue(state.accept(page(request, first: cursor - rows, last: cursor)))
+            cursor -= rows; fetched += 1
+            XCTAssertFalse(state.browsing); XCTAssertTrue(state.rows.isEmpty)
+        }
+        XCTAssertEqual(fetched * RemoteScrollback.pageRows, RemoteScrollback.prefetchRows)
+        // Scrolling now reads the buffer and starts topping it up in the background.
+        XCTAssertNil(state.request(older: true))
+        XCTAssertEqual(state.rows.count, RemoteScrollback.pageRows)
+        let topUp = try XCTUnwrap(state.prefetch())
+        XCTAssertEqual(topUp.historyBefore, cursor)
+        XCTAssertNil(state.request(older: true), "A cached page does not cancel the background fetch")
+        XCTAssertEqual(state.pending?.id, topUp.requestID)
+    }
+    func testFullSizePageIsAcceptedAndRendered() throws {
+        let state = RemoteScrollback(feed: TerminalFeed())
+        state.update(viewport(count: 10_000))
+        let request = try XCTUnwrap(state.request(older: true))
+        let rows = UInt64(RemoteScrollback.pageRows)
+        XCTAssertTrue(state.accept(page(request, first: 10_000 - rows, last: 10_000)))
+        XCTAssertEqual(state.rows.count, RemoteScrollback.pageRows)
+        let next = try XCTUnwrap(state.request(older: true))
+        XCTAssertFalse(state.accept(page(next, first: 10_000 - 3 * rows, last: 10_000 - rows)), "Oversized pages are rejected")
     }
 }

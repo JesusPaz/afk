@@ -10,6 +10,13 @@ public final class RemoteScrollback {
     public private(set) var end: UInt64 = 0
     public private(set) var browsing = false
     public private(set) var pending: (id: String, cursor: UInt64, older: Bool)?
+    /// Large pages keep a fast scroll ahead of a cellular round trip; the window spans three of them.
+    static let pageRows = TerminalRowStore.pageRows
+    static let windowRows = 3 * pageRows
+    /// Rows kept loaded ahead of the reader, fetched one page after another without waiting for a scroll.
+    static let prefetchRows = 8 * pageRows
+    static let cacheRows = 8192
+    static let cacheBytes = 4 * 1024 * 1024
     private var prefetching = false
     private var cache: [UInt64: TerminalRow] = [:]
     private var cacheOrder: [UInt64] = []
@@ -46,6 +53,13 @@ public final class RemoteScrollback {
         }
         let cursor = older ? start : end
         guard !older || cursor > 0 else { return nil }
+        // Rows already buffered are shown at once and leave a background fetch running.
+        let page = cachedPage(cursor: cursor, older: older)
+        if !page.isEmpty {
+            browsing = true
+            append(page, first: older ? cursor - UInt64(page.count) : cursor, older: older)
+            return nil
+        }
         if let pending {
             guard prefetching else { return nil }
             if pending.cursor == cursor && pending.older == older {
@@ -55,33 +69,33 @@ public final class RemoteScrollback {
             self.pending = nil
         }
         browsing = true
-        let page = cachedPage(cursor: cursor, older: older)
-        if !page.isEmpty {
-            append(page, first: older ? cursor - UInt64(page.count) : cursor, older: older)
-            return nil
-        }
         return makeRequest(cursor: cursor, older: older, prefetch: false)
     }
-    /// One page ahead; receiving it never moves the visible window or starts another fetch.
+    /// The next page past whatever is already buffered, until `prefetchRows` are ready ahead
+    /// of the reader. Receiving it never moves the visible window.
     public func prefetch(older: Bool = true) -> Message? {
         guard let viewport, viewport.scrollUp == nil, pending == nil else { return nil }
-        let cursor = older ? start : end
-        guard older ? cursor > 0 : cursor < viewport.historyCount,
-              cachedPage(cursor: cursor, older: older).isEmpty else { return nil }
+        var cursor = older ? start : end, ahead = 0
+        while ahead < Self.prefetchRows {
+            if older { guard cursor > 0, cache[cursor - 1] != nil else { break }; cursor -= 1 }
+            else { guard cursor < viewport.historyCount, cache[cursor] != nil else { break }; cursor += 1 }
+            ahead += 1
+        }
+        guard ahead < Self.prefetchRows, older ? cursor > 0 : cursor < viewport.historyCount else { return nil }
         return makeRequest(cursor: cursor, older: older, prefetch: true)
     }
     private func makeRequest(cursor: UInt64, older: Bool, prefetch: Bool) -> Message {
         let id = UUID().uuidString
         pending = (id, cursor, older); prefetching = prefetch
         var message = Message("historyPage")
-        message.requestID = id
+        message.requestID = id; message.historyLimit = Self.pageRows
         if older { message.historyBefore = cursor } else { message.historyStart = cursor }
         return message
     }
     private func cachedPage(cursor: UInt64, older: Bool) -> [TerminalRow] {
         var result: [TerminalRow] = []
         var index = cursor
-        while result.count < 64 {
+        while result.count < Self.pageRows {
             if older { guard index > 0 else { break }; index -= 1 }
             guard let row = cache[index] else { break }
             result.append(row)
@@ -93,7 +107,7 @@ public final class RemoteScrollback {
         guard let pending, message.requestID == pending.id,
               let first = message.historyStart, let last = message.historyBefore,
               let page = message.historyRows, first <= last, last - first == UInt64(page.count),
-              page.count <= 64, page.allSatisfy({ (2...400).contains($0.columns) }),
+              page.count <= Self.pageRows, page.allSatisfy({ (2...400).contains($0.columns) }),
               (pending.older ? last == pending.cursor : first == pending.cursor) else { return false }
         self.pending = nil
         for (offset, row) in page.enumerated() {
@@ -104,7 +118,7 @@ public final class RemoteScrollback {
             }
         }
         var evicted = 0
-        while cachedBytes > 1024 * 1024 || cache.count > 4096 {
+        while cachedBytes > Self.cacheBytes || cache.count > Self.cacheRows {
             let index = cacheOrder[evicted]; evicted += 1
             if let row = cache.removeValue(forKey: index) { cachedBytes -= row.ansi.utf8.count + 16 }
         }
@@ -116,11 +130,11 @@ public final class RemoteScrollback {
     private func append(_ page: [TerminalRow], first: UInt64, older: Bool) {
         if older {
             rows.insert(contentsOf: page, at: 0); start = first
-            if rows.count > 256 { rows.removeLast(rows.count - 256) }
+            if rows.count > Self.windowRows { rows.removeLast(rows.count - Self.windowRows) }
             end = start + UInt64(rows.count)
         } else {
             rows.append(contentsOf: page); end = first + UInt64(page.count)
-            if rows.count > 256 { rows.removeFirst(rows.count - 256) }
+            if rows.count > Self.windowRows { rows.removeFirst(rows.count - Self.windowRows) }
             start = end - UInt64(rows.count)
         }
         display(following: false)

@@ -78,9 +78,11 @@ struct TerminalCanvas: View {
     let input: (Data) -> Void
     let resize: (TerminalSize) -> Void
     var active = true
+    /// Phone only: a tap on the terminal asks for the input bar.
+    var keyboardRequested: (() -> Void)?
     var body: some View {
-        TerminalSurface(feed: feed, editable: editable, input: input, resize: resize, active: active)
-            .padding(8)
+        surface
+            .padding(Self.inset)
             .background(AFKStyle.terminalBackground)
             .overlay {
                 if feed.isRestoringHistory {
@@ -89,6 +91,15 @@ struct TerminalCanvas: View {
                 }
             }
     }
+    #if os(iOS)
+    private static let inset: CGFloat = 4
+    private var surface: TerminalSurface {
+        TerminalSurface(feed: feed, editable: editable, input: input, resize: resize, active: active, keyboardRequested: keyboardRequested)
+    }
+    #else
+    private static let inset: CGFloat = 8
+    private var surface: TerminalSurface { TerminalSurface(feed: feed, editable: editable, input: input, resize: resize, active: active) }
+    #endif
 }
 
 struct SessionGroupMark: View {
