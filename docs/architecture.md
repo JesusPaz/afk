@@ -20,8 +20,8 @@ acknowledged transfer per phone, with bounded packets; intermediate visual updat
 may be skipped, while every original output event remains in the Mac recording.
 
 Rows entering normal scrollback are appended to owner-only row/index files. Scrolling
-near either edge requests up to 64 rows / 64 KiB from disk; the phone keeps a maximum
-of 256 historical rows and restores the visible row's absolute position after loading.
+near either edge requests up to 256 rows / 192 KiB from disk; the phone keeps a maximum
+of 768 historical rows and restores the visible row's absolute position after loading.
 While reading history, live screen state continues updating separately. Resize archives
 newly hidden visible text without re-reading the full recording. Archived rows retain
 their historical width rather than reflowing all past output on every resize.
@@ -50,4 +50,4 @@ The initial migration is embedded and applied in a PostgreSQL advisory-locked tr
 
 ## Efficiency
 
-One shared Swift package for protocol/networking and one for host responsibilities. Terminal rendering uses SwiftTerm rather than implementing a terminal parser. Go uses an 8-connection database pool and retains live routing in memory. HTTP bodies are capped at 8 KiB, WebSocket messages at 64 KiB, decrypted application packets at 512 KiB, outbound queues at 16 messages, input at 8 KiB and legacy in-memory replay at 256 KiB per session. Screen frames are capped at 8 MiB and transferred in acknowledged 24 KiB binary parts, paced by 20 ms acknowledgements. History pages are capped at 64 rows and 64 KiB, with one outstanding request per phone, paced at 100 ms. Slow peers are disconnected rather than accumulating unbounded output. These are developer limits, not benchmark results. One relay instance only; no cross-node fanout yet.
+One shared Swift package for protocol/networking and one for host responsibilities. Terminal rendering uses SwiftTerm rather than implementing a terminal parser. Go uses an 8-connection database pool and retains live routing in memory. HTTP bodies are capped at 8 KiB, WebSocket messages at 64 KiB, decrypted application packets at 512 KiB, outbound queues at 16 messages, input at 8 KiB and legacy in-memory replay at 256 KiB per session. Screen frames are capped at 8 MiB and transferred in acknowledged 24 KiB binary parts, paced by 20 ms acknowledgements. History pages are capped at 256 rows and 192 KiB of encoded rows (64 rows for phones that do not send `historyLimit`), with one outstanding request per phone, paced at 100 ms. Slow peers are disconnected rather than accumulating unbounded output. These are developer limits, not benchmark results. One relay instance only; no cross-node fanout yet.

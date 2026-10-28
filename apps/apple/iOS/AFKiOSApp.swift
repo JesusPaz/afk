@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import VisionKit
+import Speech
 import AFKCore
 
 @main
@@ -271,86 +272,52 @@ struct PhoneTerminal: View {
     @State private var confirmEnd = false
     @State private var draft = ""
     @State private var mirroredDraft = ""
+    @State private var dictationPrefix = ""
+    @StateObject private var dictation = PhoneDictation()
+    @FocusState private var typing: Bool
+    @State private var composing = false
     private var currentSession: SessionInfo { model.sessions.first(where: { $0.id == session.id }) ?? session }
     private var terminalTitle: String {
         let duplicate = model.sessions.filter { $0.name == currentSession.name && $0.context == currentSession.context }.count > 1
         return currentSession.name + (duplicate ? " · " + String(session.id.prefix(8)) : "")
     }
     private var running: Bool { model.sessions.first(where: { $0.id == session.id })?.running ?? false }
+    private var writing: Bool { model.canWrite && running }
+    /// While typing or dictating, only the terminal and the input bar stay on screen.
+    private var immersive: Bool { writing && (typing || dictation.listening) }
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    SessionGroupMark(group: currentSession.group)
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let group = currentSession.group { Text(group.name).font(.caption.weight(.semibold)) }
-                        if let context = currentSession.context { Text(context).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                    }
-                }
-                Label(model.terminalStatus, systemImage: model.canWrite ? "keyboard" : "eye")
-                    .font(.subheadline.weight(.medium))
-                if let notice = model.sessionNotice { InlineNotice(text: notice).textSelection(.enabled) }
-                if let diagnostic = model.diagnostic {
-                    Button(L10n.text("Copiar diagnóstico"), systemImage: "doc.on.doc") {
-                        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-                        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-                        UIPasteboard.general.string = diagnostic + " | iOS " + UIDevice.current.systemVersion + " | AFK " + version + " (" + build + ")"
-                    }.font(.caption).frame(minHeight: 44)
-                }
-                if model.loadingHistory { ProgressView() }
-                if let expiry = model.selectedInfo?.controlExpiresAt {
-                    Text(L10n.text("Control autorizado hasta") + " " + expiry.formatted(date: .omitted, time: .shortened)).font(.caption)
-                } else if model.ready { Text(L10n.text("Solo lectura. Autoriza el control desde el Mac.")).font(.caption) }
-                if running && model.ready {
-                    Button(model.canWrite ? L10n.text("Pasar a solo lectura") : L10n.text("Escribir desde aquí")) {
-                        if model.canWrite { model.release() } else { model.claim() }
-                    }.buttonStyle(.bordered).frame(minHeight: 44).disabled(!model.canClaim)
-                } else if !model.hostAvailable || running {
-                    Button(L10n.text("Volver a conectar"), systemImage: "arrow.clockwise") { model.reconnect() }
-                        .frame(minHeight: 44)
-                }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 8)
-            Divider()
-            TerminalCanvas(feed: model.feed, editable: model.canWrite && running, input: { releaseDraft(); model.input($0) }, resize: model.resize)
-            if model.canWrite && running {
-                HStack(spacing: 8) {
-                    // A native field gets reliable iOS dictation; each edit reaches the terminal as it happens.
-                    TextField(L10n.text("Escribe o dicta un comando"), text: $draft)
-                        .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .submitLabel(.send).onSubmit(sendDraft)
-                        .onChange(of: draft) { _, next in
-                            let plain = TerminalLineEdit.plain(next)
-                            guard plain == next else { draft = plain; return }
-                            let edit = TerminalLineEdit.bytes(from: mirroredDraft, to: next)
-                            if edit.isEmpty || model.input(edit) { mirroredDraft = next } else { releaseDraft() }
-                        }
-                    Button(L10n.text("Enviar"), systemImage: "return", action: sendDraft)
-                        .labelStyle(.iconOnly).buttonStyle(.borderedProminent).frame(minWidth: 44, minHeight: 44)
-                }.padding(.horizontal, 12).padding(.top, 6)
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach([("Esc", "\u{1b}"), ("Tab", "\t"), ("Ctrl+C", "\u{3}"), ("↑", "\u{1b}[A"), ("↓", "\u{1b}[B"), ("←", "\u{1b}[D"), ("→", "\u{1b}[C")], id: \.0) { key in
-                            Button(key.0) { releaseDraft(); model.input(Data(key.1.utf8)) }
-                                .font(.subheadline.monospaced()).frame(minWidth: 44, minHeight: 44)
-                                .accessibilityLabel(keyLabel(key.0))
-                        }
-                    }.padding(.horizontal, 12)
-                }.scrollIndicators(.hidden).buttonStyle(.bordered).padding(.vertical, 4)
-            } else {
-                Text(L10n.text("Desliza la terminal para ver las demás columnas."))
-                    .font(.caption).foregroundStyle(.secondary).padding(10)
-            }
+            TerminalCanvas(feed: model.feed, editable: writing, input: { releaseDraft(); model.input($0) }, resize: model.resize,
+                           keyboardRequested: openKeyboard)
+                .overlay(alignment: .top) { notices }
+            if writing { inputBar } else { statusBar }
         }
+        .toolbarBackground(AFKStyle.terminalBackground, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar(immersive ? .hidden : .visible, for: .navigationBar)
+        .statusBarHidden(immersive)
+        .animation(.easeOut(duration: 0.2), value: immersive)
+        .onChange(of: typing) { _, focused in if !focused { composing = false } }
         .onChange(of: running) { _, _ in releaseDraft() }
+        .onChange(of: writing) { _, next in if !next { releaseDraft(); typing = false } }
         .confirmationDialog(L10n.text(currentSession.canRemove == true ? "¿Cerrar y quitar esta sesión?" : "¿Terminar esta sesión?"), isPresented: $confirmEnd, titleVisibility: .visible) {
             Button(L10n.text(currentSession.canRemove == true ? "Cerrar y quitar" : "Terminar sesión"), role: .destructive) { model.closeSession(session.id) }
         } message: { Text([currentSession.group?.name, currentSession.name].compactMap { $0 }.joined(separator: " / ") + "\n" + L10n.text("Se detendrá la terminal. Su historial guardado se conservará.")) }
         .navigationTitle(terminalTitle).navigationBarTitleDisplayMode(.inline)
-        .onAppear { model.attach(session.id) }.onDisappear { model.leave() }
+        .onAppear { model.attach(session.id) }.onDisappear { dictation.cancel(); model.leave() }
         .onChange(of: model.selected) { _, selection in if selection == nil { dismiss() } }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    let place = [currentSession.group?.name, currentSession.context].compactMap { $0 }
+                    if !place.isEmpty { Text(place.joined(separator: " · ")) }
+                    if writing {
+                        if let expiry = model.selectedInfo?.controlExpiresAt {
+                            Text(L10n.text("Control autorizado hasta") + " " + expiry.formatted(date: .omitted, time: .shortened))
+                        }
+                        Button(L10n.text("Pasar a solo lectura"), systemImage: "eye") { model.release() }
+                    }
                     Button(L10n.text("Reconectar"), systemImage: "arrow.clockwise") { model.reconnect() }
                     Button(L10n.text("Ocultar en este dispositivo"), systemImage: "eye.slash") { model.hideSession(session.id); dismiss() }
                     Button(model.closeActionTitle(currentSession), role: .destructive) {
@@ -360,21 +327,207 @@ struct PhoneTerminal: View {
             }
         }
     }
+    /// Notices float over the terminal instead of taking rows from it.
+    private var notices: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            if let notice = model.sessionNotice {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                    Text(notice).font(.footnote).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    if model.diagnostic != nil {
+                        Button(L10n.text("Copiar diagnóstico"), systemImage: "doc.on.doc", action: copyDiagnostic).labelStyle(.iconOnly)
+                    }
+                    Button(L10n.text("Cerrar aviso"), systemImage: "xmark") { model.sessionNotice = nil }.labelStyle(.iconOnly)
+                }
+                .padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+            }
+            if model.loadingHistory { ProgressView().padding(8).background(.regularMaterial, in: Circle()) }
+        }.padding(8)
+    }
+    private var statusBar: some View {
+        HStack(spacing: 12) {
+            Label(statusText, systemImage: model.browsingHistory ? "clock.arrow.circlepath" : "eye")
+                .font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+            Spacer(minLength: 8)
+            if running && model.ready {
+                if model.browsingHistory && model.ownsControl {
+                    Button(L10n.text("Volver al final")) { model.returnToLive() }.buttonStyle(.borderedProminent)
+                } else {
+                    Button(L10n.text("Escribir desde aquí")) { model.claim() }.buttonStyle(.borderedProminent).disabled(!model.canClaim)
+                }
+            } else if !model.hostAvailable || running {
+                Button(L10n.text("Volver a conectar"), systemImage: "arrow.clockwise") { model.reconnect() }.buttonStyle(.bordered)
+            }
+        }
+        .frame(minHeight: 44).padding(.horizontal, 12).padding(.vertical, 4).background(.bar)
+    }
+    private var statusText: String {
+        guard model.ready && running else { return model.terminalStatus }
+        if model.browsingHistory { return L10n.text("Viendo el historial") }
+        return L10n.text(model.canClaim ? "Solo lectura" : "Solo lectura. Autoriza el control desde el Mac.")
+    }
+    private var inputBar: some View {
+        VStack(spacing: 6) {
+            if composing || typing || dictation.listening || !draft.isEmpty {
+                // A native field gets reliable iOS dictation; each edit reaches the terminal as it happens.
+                TextField(L10n.text(dictation.listening ? "Escuchando…" : "Escribe o dicta un comando"), text: $draft)
+                    .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .focused($typing).submitLabel(.send).onSubmit(sendDraft)
+                    .onChange(of: draft) { _, next in
+                        let plain = TerminalLineEdit.plain(next)
+                        guard plain == next else { draft = plain; return }
+                        let edit = TerminalLineEdit.bytes(from: mirroredDraft, to: next)
+                        if edit.isEmpty || model.input(edit) { mirroredDraft = next } else { releaseDraft() }
+                    }
+                    .padding(.horizontal, 8)
+            }
+            HStack(spacing: 6) {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 6) {
+                        barButton(L10n.text(typing ? "Ocultar teclado" : "Mostrar teclado"),
+                                  symbol: typing ? "keyboard.chevron.compact.down" : "keyboard") {
+                            if typing { typing = false } else { openKeyboard() }
+                        }
+                        barButton(L10n.text(dictation.listening ? "Dejar de dictar" : "Dictar"),
+                                  symbol: dictation.listening ? "mic.fill" : "mic", action: toggleDictation)
+                            .tint(dictation.listening ? .red : .accentColor)
+                        ForEach([("Esc", "\u{1b}"), ("Tab", "\t"), ("^C", "\u{3}")], id: \.0) { key($0.0, $0.1) }
+                        shortcuts
+                        ForEach([("↑", "\u{1b}[A"), ("↓", "\u{1b}[B"), ("←", "\u{1b}[D"), ("→", "\u{1b}[C")], id: \.0) { key($0.0, $0.1) }
+                    }.padding(.leading, 8)
+                }.scrollIndicators(.hidden)
+                Button(L10n.text("Enviar"), systemImage: "return", action: sendDraft)
+                    .labelStyle(.iconOnly).buttonStyle(.borderedProminent).frame(minWidth: 44, minHeight: 40).padding(.trailing, 8)
+            }
+        }
+        .buttonStyle(.bordered).padding(.vertical, 6).background(.bar)
+        // Swiping the bar down puts the keyboard away, like a sheet.
+        .gesture(DragGesture(minimumDistance: 20).onEnded { if $0.translation.height > 20 { typing = false } })
+    }
+    private func barButton(_ label: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(label, systemImage: symbol, action: action).labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 40)
+    }
+    private func key(_ title: String, _ bytes: String) -> some View {
+        Button(title) { send(bytes) }
+            .font(.subheadline.monospaced()).frame(minWidth: 44, minHeight: 40)
+            .accessibilityLabel(keyLabel(title))
+    }
+    private var shortcuts: some View {
+        Menu {
+            Section("Ctrl") {
+                ForEach(["C", "D", "Z", "L", "R", "A", "E", "U", "W", "K"], id: \.self) { letter in
+                    Button("Ctrl+" + letter) { send(String(UnicodeScalar(letter.unicodeScalars.first!.value & 0x1f)!)) }
+                }
+            }
+            Section(L10n.text("Agentes")) {
+                Button(L10n.text("Cambiar modo (⇧Tab)")) { send("\u{1b}[Z") }
+                ForEach(["/clear", "/compact", "/resume"], id: \.self) { command in Button(command) { send(command + "\r") } }
+            }
+        } label: { Text("Ctrl").font(.subheadline.monospaced()).frame(minWidth: 44, minHeight: 40) }
+        .accessibilityLabel(L10n.text("Atajos de control"))
+    }
+    /// The field only exists while composing, so it has to appear before it can take focus.
+    private func openKeyboard() {
+        composing = true
+        DispatchQueue.main.async { typing = true }
+    }
+    private func send(_ bytes: String) { releaseDraft(); model.input(Data(bytes.utf8)) }
     private func sendDraft() {
         // The text is already on the terminal line; Enter runs it and the field starts over.
         releaseDraft(); model.input(Data("\r".utf8))
     }
     /// Leaves whatever is on the terminal line there and stops mirroring it.
-    private func releaseDraft() { mirroredDraft = ""; draft = "" }
+    private func releaseDraft() { dictation.cancel(); mirroredDraft = ""; draft = "" }
+    private func toggleDictation() {
+        if dictation.listening { dictation.stop(); return }
+        // Dictating needs no keyboard, so the terminal keeps the space.
+        typing = false
+        dictationPrefix = draft.isEmpty || draft.hasSuffix(" ") ? draft : draft + " "
+        Task { await dictation.start(text: { draft = dictationPrefix + $0 }, failed: { model.sessionNotice = $0 }) }
+    }
+    private func copyDiagnostic() {
+        guard let diagnostic = model.diagnostic else { return }
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        UIPasteboard.general.string = diagnostic + " | iOS " + UIDevice.current.systemVersion + " | AFK " + version + " (" + build + ")"
+    }
     private func keyLabel(_ key: String) -> String {
         switch key {
         case "↑": return L10n.text("Flecha arriba")
         case "↓": return L10n.text("Flecha abajo")
         case "←": return L10n.text("Flecha izquierda")
         case "→": return L10n.text("Flecha derecha")
-        case "Ctrl+C": return L10n.text("Control C, interrumpir comando")
+        case "^C": return L10n.text("Control C, interrumpir comando")
         default: return key
         }
+    }
+}
+
+/// Hands-free dictation for the input bar. Partial results replace the draft as they
+/// arrive, so corrections reach the terminal while the user is still speaking.
+@MainActor
+final class PhoneDictation: ObservableObject {
+    @Published private(set) var listening = false
+    private let engine = AVAudioEngine()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+
+    func start(text: @escaping (String) -> Void, failed: @escaping (String) -> Void) async {
+        guard task == nil else { return }
+        guard await Self.authorize() else { failed(L10n.text("Permite el micrófono y el reconocimiento de voz en Ajustes para dictar.")); return }
+        guard task == nil, let recognizer = SFSpeechRecognizer(), recognizer.isAvailable else {
+            failed(L10n.text("El dictado no está disponible ahora.")); return
+        }
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.addsPunctuation = true
+        // Audio stays on the iPhone whenever the language supports it.
+        request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.record, mode: .measurement, options: .duckOthers)
+            try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
+            let input = engine.inputNode
+            input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { buffer, _ in request.append(buffer) }
+            engine.prepare()
+            try engine.start()
+        } catch { stopAudio(); failed(error.localizedDescription); return }
+        self.request = request; listening = true
+        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            let transcript = result?.bestTranscription.formattedString
+            let done = error != nil || result?.isFinal == true
+            Task { @MainActor in
+                // A cancelled or replaced recognition must never retype text.
+                guard let self, self.request === request else { return }
+                if let transcript { text(transcript) }
+                if done { self.finish() }
+            }
+        }
+    }
+    /// Stops listening; the recognizer may still refine the last words it heard.
+    func stop() {
+        guard listening else { return }
+        stopAudio(); request?.endAudio()
+    }
+    func cancel() {
+        guard let task else { return }
+        task.cancel(); finish()
+    }
+    private func finish() {
+        if listening { stopAudio() }
+        request = nil; task = nil
+    }
+    private func stopAudio() {
+        listening = false
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+    private static func authorize() async -> Bool {
+        let speech = await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+        }
+        guard speech == .authorized else { return false }
+        return await AVAudioApplication.requestRecordPermission()
     }
 }
 

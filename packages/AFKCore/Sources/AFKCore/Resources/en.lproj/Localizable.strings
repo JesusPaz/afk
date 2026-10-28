@@ -486,3 +486,16 @@
 "Nueva sesión junto a la actual (⌘N). Mantén pulsado para crear un grupo o perfil." = "New session next to the current one (⌘N). Hold to create a group or profile.";
 "Escribe o dicta un comando" = "Type or dictate a command";
 "Enviar" = "Send";
+"Escuchando…" = "Listening…";
+"Mostrar teclado" = "Show keyboard";
+"Ocultar teclado" = "Hide keyboard";
+"Dictar" = "Dictate";
+"Dejar de dictar" = "Stop dictating";
+"Atajos de control" = "Control shortcuts";
+"Agentes" = "Agents";
+"Cambiar modo (⇧Tab)" = "Switch mode (⇧Tab)";
+"Cerrar aviso" = "Dismiss notice";
+"Viendo el historial" = "Viewing history";
+"Volver al final" = "Back to live";
+"Permite el micrófono y el reconocimiento de voz en Ajustes para dictar." = "Allow the microphone and speech recognition in Settings to dictate.";
+"El dictado no está disponible ahora." = "Dictation isn't available right now.";

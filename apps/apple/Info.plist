@@ -13,5 +13,7 @@
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 <key>NSCameraUsageDescription</key><string>AFK uses the camera to scan the pairing QR on your Mac.</string>
 <key>NSFaceIDUsageDescription</key><string>AFK verifies your identity before allowing access to your Mac terminal.</string>
+<key>NSMicrophoneUsageDescription</key><string>AFK listens only while you dictate a command into your Mac terminal.</string>
+<key>NSSpeechRecognitionUsageDescription</key><string>AFK turns your dictation into text for your Mac terminal, on the iPhone when the language allows it.</string>
 <key>NSLocalNetworkUsageDescription</key><string>AFK connects to the relay you chose to share your Mac terminal.</string>
 </dict></plist>

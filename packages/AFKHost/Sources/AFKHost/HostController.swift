@@ -506,8 +506,10 @@ public final class HostController: ObservableObject {
             do {
                 guard let screen = session.screen, screen.error == nil, let archive = screen.archive else { throw CocoaError(.fileReadUnknown) }
                 let page: (start: UInt64, rows: [TerminalRow])
-                if let before = m.historyBefore { page = try archive.page(before: before) }
-                else if let after = m.historyStart { page = try archive.page(after: after) }
+                // Phones that predate larger pages reject anything over 64 rows.
+                let limit = m.historyLimit ?? 64
+                if let before = m.historyBefore { page = try archive.page(before: before, limit: limit) }
+                else if let after = m.historyStart { page = try archive.page(after: after, limit: limit) }
                 else { return }
                 var reply = Message("historyPage", sessionID: session.id)
                 reply.clientID = client; reply.viewportID = view.id; reply.requestID = request

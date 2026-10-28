@@ -486,3 +486,16 @@
 "Nueva sesión junto a la actual (⌘N). Mantén pulsado para crear un grupo o perfil." = "Nueva sesión junto a la actual (⌘N). Mantén pulsado para crear un grupo o perfil.";
 "Escribe o dicta un comando" = "Escribe o dicta un comando";
 "Enviar" = "Enviar";
+"Escuchando…" = "Escuchando…";
+"Mostrar teclado" = "Mostrar teclado";
+"Ocultar teclado" = "Ocultar teclado";
+"Dictar" = "Dictar";
+"Dejar de dictar" = "Dejar de dictar";
+"Atajos de control" = "Atajos de control";
+"Agentes" = "Agentes";
+"Cambiar modo (⇧Tab)" = "Cambiar modo (⇧Tab)";
+"Cerrar aviso" = "Cerrar aviso";
+"Viendo el historial" = "Viendo el historial";
+"Volver al final" = "Volver al final";
+"Permite el micrófono y el reconocimiento de voz en Ajustes para dictar." = "Permite el micrófono y el reconocimiento de voz en Ajustes para dictar.";
+"El dictado no está disponible ahora." = "El dictado no está disponible ahora.";
