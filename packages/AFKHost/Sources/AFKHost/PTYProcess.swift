@@ -18,10 +18,10 @@ final class PTYProcess {
     private var exitStatus: Int32?
     private var closePoll: Task<Void, Never>?
 
-    func start(shell: String, environment: [String]) -> Bool {
+    func start(shell: String, environment: [String], directory: String = FileManager.default.homeDirectoryForCurrentUser.path) -> Bool {
         var size = winsize(ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
         guard let child = PseudoTerminalHelpers.fork(andExec: shell, args: [shell, "-l"], env: environment,
-            currentDirectory: FileManager.default.homeDirectoryForCurrentUser.path, desiredWindowSize: &size) else { return false }
+            currentDirectory: directory, desiredWindowSize: &size) else { return false }
         fd = child.masterFd; pid = child.pid
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
