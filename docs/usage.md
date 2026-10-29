@@ -26,18 +26,28 @@ The secure invitation expires in five minutes and works once. Saved device crede
 
 ## Mac keyboard shortcuts
 
+Everything in the Mac window works from the keyboard. **⌘/** shows this list in the app.
+
 | Shortcut | Action |
 | --- | --- |
 | ⌘N | New session in the current group |
-| ⌘W | Close the selected session (asks first) |
+| ⌘W | Close the selected session: ↩ or type `yes` to confirm, esc to cancel |
 | ⇧⌘W | Close the window; sessions keep running |
-| ⌘K | Go to any terminal by name, folder, group or profile |
+| ⌘K | Go to any terminal by name, folder, group or profile; ⇧⌘⌫ closes the highlighted one |
 | ⌘⌥↑ / ⌘⌥↓ | Previous / next terminal in sidebar order |
 | ⌘1 … ⌘9 | Jump to the Nth terminal |
 | ⌘⌥← / ⌘⌥→ | Previous / next profile |
 | ⌃⌘1 … ⌃⌘9 | Switch profile |
 | ⌘⇧L | Take or release typing control on the Mac |
+| ⌘R | Rename the session |
+| ⇧⌘M | Move the session to a group or profile (type to filter, ↩ to move) |
+| ⇧⌘H | Hide the session on this Mac, or show it again |
+| ⇧⌘P | Session permissions |
+| ⇧⌘N / ⇧⌘G | New group / edit the session's group |
+| ⌥⌘N | New profile |
+| ⌘Y / ⇧⌘D / ⇧⌘C | Saved history / Devices / Connection |
 | ⌘, | Settings (live-session limit) |
+| ⌘/ | Keyboard shortcuts |
 
 The toolbar **+** creates a session next to the selected one; hold it to create a
 group or profile. **Saved history** and **Devices** (where you pair an iPhone) are
@@ -100,8 +110,10 @@ Profiles organize the Mac workspace locally. iPhone access still follows the
 existing session permissions, and Saved history remains a shared archive.
 
 Hide keeps a session running and can be undone. Hidden state is local to each device.
-Close and remove waits for the shell and foreground process group to exit, then
-removes the row while preserving saved history. Detached processes and external
+Closing a session removes it from the Mac and iPhone lists at once; the shell and its
+foreground process group exit in the background (SIGHUP, then SIGKILL after ten
+seconds if a job ignores it). A process that survives even that comes back to the list as
+Closing… so it can be forced again. Saved history is preserved. Detached processes and external
 services are outside that guarantee. Ended sessions have a separate section and do
 not consume the live-session limit. Hiding or removing the selected session
 never transfers typing to another terminal automatically.

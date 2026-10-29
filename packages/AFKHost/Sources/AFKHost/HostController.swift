@@ -33,7 +33,8 @@ public final class HostController: ObservableObject {
         var profile: WorkspaceProfile?
     }
     private var organization = Organization()
-    private var removalRequested: Set<String> = []
+    // Sessions the user closed. They leave the UI at once and finish exiting in the background.
+    @Published public private(set) var removalRequested: Set<String> = []
     private var deletedGroupPositions: [String: Int] = [:]
     @Published public private(set) var host: HostIdentity?
     @Published public private(set) var pairing: Pairing?
@@ -109,7 +110,7 @@ public final class HostController: ObservableObject {
     public func create(name: String = "Shell", id: String = UUID().uuidString, profile: WorkspaceProfile = .personal) -> HostSession? {
         guard profiles.contains(profile) else { return nil }
         if let existing = sessions.first(where: { $0.id == id }) { return existing }
-        guard sessions.filter({ $0.running }).count < sessionLimit else { error = L10n.format("Has llegado al límite de %d sesiones. Puedes cambiarlo en Ajustes.", sessionLimit); return nil }
+        guard sessions.filter({ $0.running && !removalRequested.contains($0.id) }).count < sessionLimit else { error = L10n.format("Has llegado al límite de %d sesiones. Puedes cambiarlo en Ajustes.", sessionLimit); return nil }
         let recording: TerminalHistory?
         do { recording = try historyDirectory.map { try TerminalHistory(root: $0, name: String(name.prefix(60))) } }
         catch { self.error = error.localizedDescription; return nil }
@@ -231,11 +232,29 @@ public final class HostController: ObservableObject {
     public func closeAndRemove(id: String) {
         guard let session = sessions.first(where: { $0.id == id }) else { return }
         removalRequested.insert(id)
-        if session.running { session.terminate() } else { removeEnded(id: id) }
+        guard session.running else { removeEnded(id: id); return }
+        // The session may already be closing, so publish here instead of relying on terminate().
+        publishSessions(); session.terminate()
+        // Nobody sees the session any more, so a job that ignores SIGHUP must not keep it alive.
+        Task { [weak self, weak session] in
+            try? await Task.sleep(for: self?.closeGracePeriod ?? .zero)
+            guard let self, let session, session.running, self.removalRequested.contains(id) else { return }
+            self.forceClose(id: id)
+        }
     }
+    // Long enough for an editor or an agent CLI to save its state after SIGHUP.
+    var closeGracePeriod = Duration.seconds(10)
+    var killGracePeriod = Duration.seconds(2)
     public func forceClose(id: String) {
         guard let session = sessions.first(where: { $0.id == id }) else { return }
-        removalRequested.insert(id); session.forceClose()
+        removalRequested.insert(id); publishSessions(); session.forceClose()
+        // A process that survives SIGKILL (another user's, or stuck in the kernel) comes back
+        // as «Closing…», so it stays visible and can be forced again.
+        Task { [weak self, weak session] in
+            try? await Task.sleep(for: self?.killGracePeriod ?? .zero)
+            guard let self, let session, session.running, self.removalRequested.remove(id) != nil else { return }
+            self.publishSessions()
+        }
     }
     public func removeEnded(id: String) {
         guard let session = sessions.first(where: { $0.id == id }), !session.running else { return }
@@ -413,7 +432,7 @@ public final class HostController: ObservableObject {
         return sessions.sorted {
             ($0.groupID.flatMap { order[$0] } ?? groups.count) < ($1.groupID.flatMap { order[$0] } ?? groups.count)
         }.compactMap { session in
-            guard access.level(client: client, session: session.id) != .none else { return nil }
+            guard !removalRequested.contains(session.id), access.level(client: client, session: session.id) != .none else { return nil }
             var info = session.info
             info.group = groups.first(where: { $0.id == session.groupID })
             info.canRemove = access.canClose(client: client, session: session.id)

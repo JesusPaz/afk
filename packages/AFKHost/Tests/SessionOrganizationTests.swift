@@ -244,6 +244,32 @@ final class SessionOrganizationTests: XCTestCase {
         for _ in 0..<100 where !exited { try await Task.sleep(for: .milliseconds(50)) }
         XCTAssertTrue(exited)
     }
+    @MainActor func testClosedSessionLeavesAtOnceAndResistantJobIsForced() async throws {
+        let suite = "afk-close-" + UUID().uuidString
+        let preferences = UserDefaults(suiteName: suite)!
+        defer { preferences.removePersistentDomain(forName: suite) }
+        preferences.set(1, forKey: HostController.sessionLimitKey)
+        let host = HostController(preferences: preferences)
+        defer { host.shutdown() }
+        host.closeGracePeriod = .seconds(2)
+        let session = try XCTUnwrap(host.create())
+        var ready = false
+        _ = session.feed.observe { events, _ in
+            if events.contains(where: { $0.data.map { String(decoding: $0, as: UTF8.self).contains("AFK_READY") } ?? false }) { ready = true }
+        }
+        session.localInput(Data("stty -echo; /bin/sh -c 'trap \"\" HUP TERM; printf AFK_; printf READY; while :; do sleep 1; done'\n".utf8))
+        for _ in 0..<100 where !ready { try await Task.sleep(for: .milliseconds(30)) }
+        XCTAssertTrue(ready)
+        host.closeAndRemove(id: session.id)
+        XCTAssertTrue(host.removalRequested.contains(session.id))
+        XCTAssertTrue(host.visibleSessions(for: "phone").isEmpty)
+        // The closing session no longer counts towards the live limit.
+        let next = try XCTUnwrap(host.create())
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertTrue(session.running, "the job ignores SIGHUP until the grace period ends")
+        for _ in 0..<100 where host.sessions.contains(where: { $0.id == session.id }) { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(host.sessions.map(\.id), [next.id])
+    }
 
 }
 #endif
