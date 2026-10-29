@@ -375,7 +375,6 @@
 
 "Renombrar…" = "Rename…";
 
-"Se detendrá la terminal y sus procesos vinculados. La grabación se conservará. Los servicios independientes y las tareas remotas pueden seguir activos." = "The terminal and its attached processes will stop. The recording will be kept. Independent services and remote tasks may remain active.";
 
 "Se detendrá la terminal. Su historial guardado se conservará." = "The terminal will stop. Its saved history will be kept.";
 
@@ -397,7 +396,6 @@
 
 "¿Cerrar y quitar esta sesión?" = "Close and remove this session?";
 
-"¿Forzar cierre?" = "Force close?";
 
 "Diamante" = "Diamond";
 
@@ -499,3 +497,26 @@
 "Volver al final" = "Back to live";
 "Permite el micrófono y el reconocimiento de voz en Ajustes para dictar." = "Allow the microphone and speech recognition in Settings to dictate.";
 "El dictado no está disponible ahora." = "Dictation isn't available right now.";
+"Abrir" = "Open";
+"Ajustes" = "Settings";
+"Atajos de teclado" = "Keyboard shortcuts";
+"En ⌘K" = "In ⌘K";
+"Escribir aquí / solo lectura" = "Type here / read-only";
+"Grupos y perfiles" = "Groups and profiles";
+"Ir a la terminal 1…9" = "Go to terminal 1…9";
+"Ir al perfil 1…9" = "Go to profile 1…9";
+"Mover a…" = "Move to…";
+"Mover «%@» a…" = "Move “%@” to…";
+"No hay grupos ni perfiles que coincidan" = "No matching groups or profiles";
+"Perfil anterior / siguiente" = "Previous / next profile";
+"Salir" = "Exit";
+"Terminal anterior / siguiente" = "Previous / next terminal";
+"Terminales" = "Terminals";
+"Ventanas" = "Windows";
+"esc salir" = "esc exit";
+"¿Cerrar «%@»?" = "Close “%@”?";
+"¿Forzar cierre de «%@»?" = "Force close “%@”?";
+"↩ abrir" = "↩ open";
+"↩ o escribe yes para cerrar · esc para cancelar" = "↩ or type yes to close · esc to cancel";
+"Ocultar / mostrar en este Mac" = "Hide / show on this Mac";
+"⇧⌘⌫ cerrar" = "⇧⌘⌫ close";

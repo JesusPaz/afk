@@ -375,7 +375,6 @@
 
 "Renombrar…" = "Renombrar…";
 
-"Se detendrá la terminal y sus procesos vinculados. La grabación se conservará. Los servicios independientes y las tareas remotas pueden seguir activos." = "Se detendrá la terminal y sus procesos vinculados. La grabación se conservará. Los servicios independientes y las tareas remotas pueden seguir activos.";
 
 "Se detendrá la terminal. Su historial guardado se conservará." = "Se detendrá la terminal. Su historial guardado se conservará.";
 
@@ -397,7 +396,6 @@
 
 "¿Cerrar y quitar esta sesión?" = "¿Cerrar y quitar esta sesión?";
 
-"¿Forzar cierre?" = "¿Forzar cierre?";
 
 "Diamante" = "Diamante";
 
@@ -499,3 +497,26 @@
 "Volver al final" = "Volver al final";
 "Permite el micrófono y el reconocimiento de voz en Ajustes para dictar." = "Permite el micrófono y el reconocimiento de voz en Ajustes para dictar.";
 "El dictado no está disponible ahora." = "El dictado no está disponible ahora.";
+"Abrir" = "Abrir";
+"Ajustes" = "Ajustes";
+"Atajos de teclado" = "Atajos de teclado";
+"En ⌘K" = "En ⌘K";
+"Escribir aquí / solo lectura" = "Escribir aquí / solo lectura";
+"Grupos y perfiles" = "Grupos y perfiles";
+"Ir a la terminal 1…9" = "Ir a la terminal 1…9";
+"Ir al perfil 1…9" = "Ir al perfil 1…9";
+"Mover a…" = "Mover a…";
+"Mover «%@» a…" = "Mover «%@» a…";
+"No hay grupos ni perfiles que coincidan" = "No hay grupos ni perfiles que coincidan";
+"Perfil anterior / siguiente" = "Perfil anterior / siguiente";
+"Salir" = "Salir";
+"Terminal anterior / siguiente" = "Terminal anterior / siguiente";
+"Terminales" = "Terminales";
+"Ventanas" = "Ventanas";
+"esc salir" = "esc salir";
+"¿Cerrar «%@»?" = "¿Cerrar «%@»?";
+"¿Forzar cierre de «%@»?" = "¿Forzar cierre de «%@»?";
+"↩ abrir" = "↩ abrir";
+"↩ o escribe yes para cerrar · esc para cancelar" = "↩ o escribe yes para cerrar · esc para cancelar";
+"Ocultar / mostrar en este Mac" = "Ocultar / mostrar en este Mac";
+"⇧⌘⌫ cerrar" = "⇧⌘⌫ cerrar";

@@ -86,6 +86,14 @@ private struct WorkspaceNavigation {
     let selectProfile: (Int) -> Void
     let stepProfile: (Int) -> Void
     let quickOpen: () -> Void
+    let hasSession: Bool
+    let hasGroup: Bool
+    let sessionHidden: Bool
+    let perform: (WorkspaceCommand) -> Void
+}
+// Everything the mouse can do in the workspace also has a menu item and a shortcut.
+private enum WorkspaceCommand {
+    case rename, move, hide, newGroup, newProfile, editGroup, permissions, history, devices, connection, shortcuts
 }
 private struct WorkspaceNavigationKey: FocusedValueKey {
     typealias Value = WorkspaceNavigation
@@ -110,6 +118,31 @@ private struct SessionWorkspaceCommands: Commands {
                 if let close = workspace?.closeSession { close() } else { NSApp.keyWindow?.performClose(nil) }
             }.keyboardShortcut("w")
             Button(L10n.text("Cerrar ventana")) { NSApp.keyWindow?.performClose(nil) }.keyboardShortcut("w", modifiers: [.command, .shift])
+        }
+        CommandMenu(L10n.text("Sesión")) {
+            Group {
+                Button(L10n.text("Renombrar…")) { workspace?.perform(.rename) }.keyboardShortcut("r")
+                Button(L10n.text("Mover a…")) { workspace?.perform(.move) }.keyboardShortcut("m", modifiers: [.command, .shift])
+                Button(workspace?.sessionHidden == true ? L10n.text("Mostrar en la barra lateral") : L10n.text("Ocultar en este Mac")) { workspace?.perform(.hide) }.keyboardShortcut("h", modifiers: [.command, .shift])
+                Button(L10n.text("Permisos de la sesión…")) { workspace?.perform(.permissions) }.keyboardShortcut("p", modifiers: [.command, .shift])
+            }.disabled(workspace?.hasSession != true)
+            Divider()
+            Button(L10n.text("Nuevo grupo…")) { workspace?.perform(.newGroup) }.keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(workspace == nil)
+            Button(L10n.text("Editar grupo…")) { workspace?.perform(.editGroup) }.keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(workspace?.hasGroup != true)
+            Button(L10n.text("Nuevo perfil…")) { workspace?.perform(.newProfile) }.keyboardShortcut("n", modifiers: [.command, .option])
+                .disabled(workspace == nil)
+            Divider()
+            Group {
+                Button(L10n.text("Historial guardado")) { workspace?.perform(.history) }.keyboardShortcut("y")
+                Button(L10n.text("Dispositivos")) { workspace?.perform(.devices) }.keyboardShortcut("d", modifiers: [.command, .shift])
+                Button(L10n.text("Conexión")) { workspace?.perform(.connection) }.keyboardShortcut("c", modifiers: [.command, .shift])
+            }.disabled(workspace == nil)
+        }
+        CommandGroup(replacing: .help) {
+            Button(L10n.text("Atajos de teclado")) { workspace?.perform(.shortcuts) }.keyboardShortcut("/")
+                .disabled(workspace == nil)
         }
         CommandMenu(L10n.text("Ir")) {
             Button(L10n.text("Ir a terminal…")) { workspace?.quickOpen() }.keyboardShortcut("k")
@@ -160,6 +193,9 @@ struct MacWorkspace: View {
     @State private var newProfileName = ""
     @State private var targetedGroup: String?
     @State private var closingSession: HostSession?
+    @State private var switcherClose: HostSession?
+    @State private var moving: HostSession?
+    @State private var showingShortcuts = false
     @State private var forceClosing = false
     @AppStorage("collapsedSessionGroups") private var collapsedGroupIDs = ""
     private var collapsedGroups: Set<String> { Set(collapsedGroupIDs.split(separator: ",").map(String.init)) }
@@ -206,7 +242,31 @@ struct MacWorkspace: View {
                 guard let current = host.profiles.firstIndex(of: profile) else { return }
                 profile = host.profiles[(current + offset + host.profiles.count) % host.profiles.count]
             },
-            quickOpen: { showingSwitcher = true })
+            quickOpen: { showingSwitcher = true },
+            hasSession: selectedSession != nil,
+            hasGroup: selectedSession?.groupID != nil,
+            sessionHidden: selectedSession?.isHidden == true,
+            perform: perform)
+    }
+    private var selectedSession: HostSession? { profileSessions.first { $0.id == selected } }
+    private func perform(_ command: WorkspaceCommand) {
+        let session = selectedSession
+        switch command {
+        case .rename: renaming = session
+        case .move: moving = session
+        case .hide:
+            guard let session else { break }
+            if session.isHidden { host.setHidden(id: session.id, hidden: false) } else { hide(session) }
+        case .permissions: if let session { permissionSession = session; sheet = .permissions }
+        case .newGroup: editingGroup = nil; showingGroupEditor = true
+        case .editGroup:
+            if let group = session.flatMap(group(for:)) { editingGroup = group; showingGroupEditor = true }
+        case .newProfile: newProfileName = ""; showingProfileEditor = true
+        case .history: showingHistory = true
+        case .devices: sheet = .devices
+        case .connection: sheet = .server
+        case .shortcuts: showingShortcuts = true
+        }
     }
 
     private func createSession(groupID: String? = nil) {
@@ -242,7 +302,9 @@ struct MacWorkspace: View {
             .strokeBorder(Color.accentColor.opacity(targeted ? 0.7 : 0), lineWidth: 1.5)
             .animation(.easeOut(duration: 0.12), value: targeted)
     }
-    private var profileSessions: [HostSession] { host.sessions.filter { $0.profile == profile } }
+    private var profileSessions: [HostSession] {
+        host.sessions.filter { $0.profile == profile && !host.removalRequested.contains($0.id) }
+    }
     private var profileGroups: [SessionGroup] { host.groups.filter { host.profile(forGroup: $0.id) == profile } }
     private var hidden: [HostSession] { profileSessions.filter(\.isHidden) }
     private var ended: [HostSession] { profileSessions.filter { !$0.running && !$0.isHidden } }
@@ -352,7 +414,7 @@ struct MacWorkspace: View {
             ZStack {
                 // Keep every live renderer attached, including hidden sessions.
                 ForEach(host.sessions) { session in
-                    LocalTerminalPane(session: session, active: session.profile == profile && session.id == selected && !session.isHidden && !session.closing && sheet == nil && !showingHistory && renaming == nil && !showingGroupEditor && !showingProfileEditor && !showingSwitcher && closingSession == nil,
+                    LocalTerminalPane(session: session, active: session.profile == profile && session.id == selected && !session.isHidden && !session.closing && sheet == nil && !showingHistory && renaming == nil && !showingGroupEditor && !showingProfileEditor && !showingSwitcher && closingSession == nil && moving == nil && !showingShortcuts,
                                       actions: { AnyView(sessionActions(session)) })
                         .opacity(session.profile == profile && session.id == selected ? 1 : 0)
                         .allowsHitTesting(session.profile == profile && session.id == selected)
@@ -396,9 +458,26 @@ struct MacWorkspace: View {
             MacConnectionSheet(host: host, server: $server, destination: destination,
                                session: destination == .permissions ? permissionSession : nil)
         }
-        .sheet(isPresented: $showingSwitcher) {
-            SessionSwitcher(host: host, currentProfile: profile, open: open)
+        .sheet(isPresented: $showingSwitcher, onDismiss: {
+            // A second sheet can only appear once the switcher is gone.
+            if let session = switcherClose { switcherClose = nil; requestClose(session) }
+        }) {
+            SessionSwitcher(host: host, currentProfile: profile, open: open, close: { switcherClose = $0 })
         }
+        .sheet(item: $closingSession) { session in
+            CloseSessionPrompt(name: session.name, force: forceClosing) { remove(session) }
+        }
+        .sheet(item: $moving) { session in
+            MoveSessionPicker(host: host, session: session) { destination in
+                switch destination {
+                case .group(let id): host.moveSession(id: session.id, groupID: id)
+                case .profile(let target):
+                    if selected == session.id { selected = nil }
+                    host.moveSession(id: session.id, profile: target)
+                }
+            }
+        }
+        .sheet(isPresented: $showingShortcuts) { KeyboardShortcutsSheet() }
         .sheet(item: $renaming) { session in
             SessionNameEditor(session: session) { host.renameSession(id: session.id, label: $0) }
         }
@@ -416,17 +495,6 @@ struct MacWorkspace: View {
                     host.updateGroup(SessionGroup(id: group.id, name: name, symbol: symbol, color: color, emoji: emoji))
                 } else { _ = host.createGroup(name: name, symbol: symbol, color: color, emoji: emoji, profile: profile) }
             }
-        }
-        .confirmationDialog(forceClosing ? L10n.text("¿Forzar cierre?") : L10n.text("¿Cerrar y quitar esta sesión?"),
-                            isPresented: Binding(get: { closingSession != nil }, set: { if !$0 { closingSession = nil } }),
-                            titleVisibility: .visible) {
-            Button(forceClosing ? L10n.text("Forzar cierre") : L10n.text("Cerrar y quitar"), role: .destructive) {
-                if let closingSession { remove(closingSession) }
-                closingSession = nil
-            }
-            Button(L10n.text("Cancelar"), role: .cancel) { closingSession = nil }
-        } message: {
-            Text([closingSession.flatMap { group(for: $0)?.name }, closingSession?.name].compactMap { $0 }.joined(separator: " / ") + "\n" + L10n.text("Se detendrá la terminal y sus procesos vinculados. La grabación se conservará. Los servicios independientes y las tareas remotas pueden seguir activos."))
         }
         .alert(L10n.text("No se pudo completar la acción"), isPresented: Binding(
             get: { host.error != nil && sheet == nil }, set: { if !$0 { host.error = nil } }
@@ -460,7 +528,7 @@ struct MacWorkspace: View {
 
     private func sessionRow(_ session: HostSession) -> some View {
         MacSessionRow(session: session, group: group(for: session),
-                      disambiguate: host.sessions.filter { $0.name == session.name }.count > 1)
+                      disambiguate: host.sessions.filter { $0.name == session.name && !host.removalRequested.contains($0.id) }.count > 1)
             .tag(session.id).contextMenu { sessionActions(session) }
             .draggable(SessionDrag(id: session.id)) { SessionDragPreview(session: session, group: group(for: session)) }
             .dropDestination(for: SessionDrag.self) { items, _ in
@@ -508,7 +576,7 @@ struct MacWorkspace: View {
         Button(L10n.text("Permisos de la sesión…")) { permissionSession = session; sheet = .permissions }
             .accessibilityIdentifier("session-permissions")
         Divider()
-        Button(session.closing ? L10n.text("Forzar cierre…") : session.running ? L10n.text("Cerrar y quitar…") : L10n.text("Quitar de la lista"),
+        Button(session.closing ? L10n.text("Forzar cierre…") : session.running ? L10n.text("Cerrar sesión…") : L10n.text("Quitar de la lista"),
                role: session.closing || session.running ? .destructive : nil) { requestClose(session) }
     }
     private func requestClose(_ session: HostSession) {
@@ -563,6 +631,7 @@ private struct SessionSwitcher: View {
     @ObservedObject var host: HostController
     let currentProfile: WorkspaceProfile
     let open: (HostSession) -> Void
+    let close: (HostSession) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var highlighted = 0
@@ -620,9 +689,150 @@ private struct SessionSwitcher: View {
                 .onChange(of: highlighted) { _, index in proxy.scrollTo(index) }
             }
             .frame(height: 320)
+            Divider()
+            HStack(spacing: 14) {
+                Text(L10n.text("↩ abrir")); Text(L10n.text("⇧⌘⌫ cerrar")); Text(L10n.text("esc salir"))
+                Spacer()
+                // ⇧⌘⌫ closes the highlighted terminal; plain ⌘⌫ still clears the search field.
+                Button(L10n.text("Cerrar sesión…")) {
+                    guard matches.indices.contains(highlighted) else { return }
+                    close(matches[highlighted]); dismiss()
+                }.keyboardShortcut(.delete, modifiers: [.command, .shift]).opacity(0).frame(width: 0, height: 0).accessibilityHidden(true)
+            }
+            .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.vertical, 8)
         }
         .frame(width: 520)
         .onAppear { focused = true }
+        .onExitCommand { dismiss() }
+    }
+}
+
+// Short confirmation that answers to the keyboard: ↩ or typing «yes» (or «sí») closes, Esc cancels.
+// Only the exact word typed since the prompt opened counts, so text meant for the terminal
+// («basic», «ssh host») never confirms; letters are swallowed so none reach the terminal.
+private struct CloseSessionPrompt: View {
+    let name: String
+    let force: Bool
+    let confirm: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @FocusState private var focused: Bool
+    @State private var typed = ""
+    private func accept() { dismiss(); confirm() }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L10n.format(force ? "¿Forzar cierre de «%@»?" : "¿Cerrar «%@»?", name)).font(.headline).lineLimit(2)
+            HStack {
+                Text(L10n.text("↩ o escribe yes para cerrar · esc para cancelar")).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(L10n.text("Cancelar")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(force ? L10n.text("Forzar cierre") : L10n.text("Cerrar"), role: .destructive) { accept() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20).frame(width: 420)
+        .focusable().focusEffectDisabled().focused($focused)
+        .onKeyPress(characters: .letters) { press in
+            typed = String((typed + press.characters.lowercased()).prefix(4))
+            if ["yes", "si", "sí"].contains(typed) { accept() }
+            return .handled
+        }
+        .onAppear { focused = true }
+    }
+}
+
+private enum MoveDestination: Hashable {
+    case group(String?)
+    case profile(WorkspaceProfile)
+}
+
+// ⇧⌘M: type to filter groups and profiles, ↑↓ to choose, ↩ to move.
+private struct MoveSessionPicker: View {
+    @ObservedObject var host: HostController
+    let session: HostSession
+    let move: (MoveDestination) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var highlighted = 0
+    @FocusState private var focused: Bool
+    private var destinations: [(MoveDestination, String)] {
+        let groups = host.groups.filter { host.profile(forGroup: $0.id) == session.profile && $0.id != session.groupID }
+        var all: [(MoveDestination, String)] = session.groupID == nil ? [] : [(.group(nil), L10n.text("Sin grupo"))]
+        all += groups.map { (.group($0.id), $0.name) }
+        all += host.profiles.filter { $0 != session.profile }.map { (.profile($0), L10n.text("Perfil") + " · " + host.profileName($0)) }
+        let terms = query.split(separator: " ").map(String.init)
+        return all.filter { item in terms.allSatisfy { item.1.localizedCaseInsensitiveContains($0) } }
+    }
+    private func choose(_ index: Int) {
+        let results = destinations
+        guard results.indices.contains(index) else { return }
+        dismiss(); move(results[index].0)
+    }
+    var body: some View {
+        VStack(spacing: 0) {
+            TextField(L10n.format("Mover «%@» a…", session.name), text: $query)
+                .textFieldStyle(.plain).font(.title3).padding(14).focused($focused)
+                .onSubmit { choose(highlighted) }
+                .onKeyPress(.downArrow) { highlighted = min(highlighted + 1, max(destinations.count - 1, 0)); return .handled }
+                .onKeyPress(.upArrow) { highlighted = max(highlighted - 1, 0); return .handled }
+                .onChange(of: query) { _, _ in highlighted = 0 }
+            Divider()
+            ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(Array(destinations.enumerated()), id: \.element.0) { index, item in
+                        Button { choose(index) } label: {
+                            Text(item.1).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(index == highlighted ? Color.accentColor.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(Rectangle())
+                        }.buttonStyle(.plain).id(index)
+                    }
+                    if destinations.isEmpty {
+                        Text(L10n.text("No hay grupos ni perfiles que coincidan")).foregroundStyle(.secondary).padding(20)
+                    }
+                }.padding(6)
+            }
+            .onChange(of: highlighted) { _, index in proxy.scrollTo(index) }
+            }
+            .frame(height: 220)
+        }
+        .frame(width: 420)
+        .onAppear { focused = true }
+        .onExitCommand { dismiss() }
+    }
+}
+
+// ⌘/ lists every shortcut, grouped the way the menus are.
+private struct KeyboardShortcutsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    private let sections: [(String, [(String, String)])] = [
+        ("Terminales", [("⌘N", "Nueva sesión"), ("⌘W", "Cerrar sesión…"), ("⌘K", "Ir a terminal…"),
+                        ("⌘⌥↑ ⌘⌥↓", "Terminal anterior / siguiente"), ("⌘1…9", "Ir a la terminal 1…9"),
+                        ("⇧⌘L", "Escribir aquí / solo lectura")]),
+        ("Sesión", [("⌘R", "Renombrar…"), ("⇧⌘M", "Mover a…"), ("⇧⌘H", "Ocultar / mostrar en este Mac"),
+                    ("⇧⌘P", "Permisos de la sesión…")]),
+        ("Grupos y perfiles", [("⇧⌘N", "Nuevo grupo…"), ("⇧⌘G", "Editar grupo…"), ("⌥⌘N", "Nuevo perfil…"),
+                               ("⌘⌥← ⌘⌥→", "Perfil anterior / siguiente"), ("⌃⌘1…9", "Ir al perfil 1…9")]),
+        ("Ventanas", [("⌘Y", "Historial guardado"), ("⇧⌘D", "Dispositivos"), ("⇧⌘C", "Conexión"), ("⌘,", "Ajustes")]),
+        ("En ⌘K", [("↩", "Abrir"), ("⇧⌘⌫", "Cerrar sesión…"), ("esc", "Salir")]),
+    ]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(L10n.text("Atajos de teclado")).font(.title3.bold())
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 6) {
+                ForEach(sections, id: \.0) { title, rows in
+                    GridRow { Text(L10n.text(title)).font(.headline).gridCellColumns(2).padding(.top, 6) }
+                    ForEach(rows, id: \.1) { keys, action in
+                        GridRow {
+                            Text(keys).font(.body.monospaced()).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                            Text(L10n.text(action))
+                        }
+                    }
+                }
+            }
+            HStack { Spacer(); Button(L10n.text("Cerrar")) { dismiss() }.keyboardShortcut(.defaultAction) }
+        }
+        .padding(24).frame(width: 440)
         .onExitCommand { dismiss() }
     }
 }

@@ -31,6 +31,7 @@ to Homebrew.
 
 Shortcuts on the Mac: **⌘K** go to a terminal, **⌘⌥↑ / ⌘⌥↓** previous / next,
 **⌘1…9** jump, **⌘⌥← / ⌘⌥→** or **⌃⌘1…9** switch profile, **⌘N** new session, **⌘W** close session.
+**⌘/** lists every shortcut.
 
 ## Docs
 
