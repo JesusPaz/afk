@@ -3,6 +3,20 @@ import Foundation
 import Combine
 import AFKCore
 
+/// Where a group's new terminals start and what they run first. Empty means the home folder and a plain shell.
+public struct GroupStart: Codable, Equatable {
+    public var directory: String?
+    public var command: String?
+    public init(directory: String? = nil, command: String? = nil) {
+        self.directory = Self.clean(directory); self.command = Self.clean(command)
+    }
+    private static func clean(_ value: String?) -> String? {
+        guard let value, !value.contains(where: \.isNewline) else { return nil }
+        let text = String(value.trimmingCharacters(in: .whitespaces).prefix(1024))
+        return text.isEmpty ? nil : text
+    }
+}
+
 public struct HostSecret: Codable {
     public let id: String
     public let token: String
@@ -16,6 +30,7 @@ public final class HostController: ObservableObject {
     @Published public private(set) var groups: [SessionGroup] = []
     @Published public private(set) var groupProfiles: [String: WorkspaceProfile] = [:]
     @Published public private(set) var customProfiles: [String: String] = [:]
+    @Published public private(set) var groupStarts: [String: GroupStart] = [:]
     public var profiles: [WorkspaceProfile] {
         [.personal, .work] + customProfiles.keys.sorted().map { WorkspaceProfile(rawValue: $0) }
     }
@@ -25,6 +40,7 @@ public final class HostController: ObservableObject {
         var sessions: [String: Metadata] = [:]
         var groupProfiles: [String: WorkspaceProfile]?
         var customProfiles: [String: String]?
+        var groupStarts: [String: GroupStart]?
     }
     private struct Metadata: Codable {
         var label: String?
@@ -36,6 +52,7 @@ public final class HostController: ObservableObject {
     // Sessions the user closed. They leave the UI at once and finish exiting in the background.
     @Published public private(set) var removalRequested: Set<String> = []
     private var deletedGroupPositions: [String: Int] = [:]
+    private var deletedGroupStarts: [String: GroupStart] = [:]
     @Published public private(set) var host: HostIdentity?
     @Published public private(set) var pairing: Pairing?
     @Published public private(set) var clients: [PairedClient] = []
@@ -77,7 +94,7 @@ public final class HostController: ObservableObject {
         if let data = preferences.data(forKey: "sessionOrganization"),
            let saved = try? JSONDecoder().decode(Organization.self, from: data), saved.version == 1 {
             organization = saved; groups = saved.groups; groupProfiles = saved.groupProfiles ?? [:]
-            customProfiles = saved.customProfiles ?? [:]
+            customProfiles = saved.customProfiles ?? [:]; groupStarts = saved.groupStarts ?? [:]
         }
         self.access = access ?? RemoteAccess(); history = AccessHistory(preferences: preferences)
         remoteAccessPaused = preferences.bool(forKey: "remoteAccessPaused")
@@ -107,8 +124,9 @@ public final class HostController: ObservableObject {
         return stored == 0 ? Self.defaultSessionLimit : min(max(stored, Self.sessionLimitRange.lowerBound), Self.sessionLimitRange.upperBound)
     }
     @discardableResult
-    public func create(name: String = "Shell", id: String = UUID().uuidString, profile: WorkspaceProfile = .personal) -> HostSession? {
+    public func create(name: String = "Shell", id: String = UUID().uuidString, profile: WorkspaceProfile = .personal, groupID: String? = nil) -> HostSession? {
         guard profiles.contains(profile) else { return nil }
+        let groupID = groups.contains(where: { $0.id == groupID }) ? groupID : nil
         if let existing = sessions.first(where: { $0.id == id }) { return existing }
         guard sessions.filter({ $0.running && !removalRequested.contains($0.id) }).count < sessionLimit else { error = L10n.format("Has llegado al límite de %d sesiones. Puedes cambiarlo en Ajustes.", sessionLimit); return nil }
         let recording: TerminalHistory?
@@ -122,13 +140,23 @@ public final class HostController: ObservableObject {
             session.groupID = groups.contains(where: { $0.id == metadata.groupID }) ? metadata.groupID : nil
             session.isHidden = metadata.hidden
             session.profile = session.groupID.map { self.profile(forGroup: $0) } ?? metadata.profile ?? .personal
+        } else if let groupID {
+            session.groupID = groupID; session.profile = self.profile(forGroup: groupID)
         }
         session.onState = { [weak self, weak session] in
             guard let self, let session else { return }
             if !session.running && self.removalRequested.contains(session.id) { self.removeEnded(id: session.id) }
             else { self.persistOrganization(); self.publishSessions() }
         }
-        sessions.append(session); persistOrganization(); session.start(); publishSessions(); return session
+        let start = groupID.flatMap { groupStarts[$0] }
+        var directory: URL?
+        if let path = start?.directory {
+            let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue { directory = url }
+            else { error = L10n.format("La carpeta %@ no existe. La terminal se abrió en tu carpeta personal.", path) }
+        }
+        sessions.append(session); persistOrganization(); session.start(directory: directory, command: start?.command); publishSessions(); return session
     }
     private func persistOrganization() {
         for session in sessions {
@@ -139,6 +167,7 @@ public final class HostController: ObservableObject {
         organization.groups = groups
         organization.groupProfiles = groupProfiles
         organization.customProfiles = customProfiles
+        organization.groupStarts = groupStarts
         organization.sessions = Dictionary(uniqueKeysWithValues: sessions.map {
             ($0.id, Metadata(label: $0.userLabel, groupID: $0.groupID, hidden: $0.isHidden, profile: $0.profile))
         })
@@ -188,11 +217,24 @@ public final class HostController: ObservableObject {
         for session in sessions where session.groupID == id { session.profile = profile }
         organizationChanged()
     }
-    @discardableResult public func createGroup(name: String, symbol: String = "folder", color: String = "blue", emoji: String? = nil, profile: WorkspaceProfile = .personal) -> SessionGroup? {
+    @discardableResult public func createGroup(name: String, symbol: String = "folder", color: String = "blue", emoji: String? = nil, profile: WorkspaceProfile = .personal, start: GroupStart = GroupStart()) -> SessionGroup? {
         guard profiles.contains(profile), let name = SessionMetadata.clean(name), groups.count < 64 else { return nil }
         let group = SessionGroup(name: name, symbol: SessionGroup.symbols.contains(symbol) ? symbol : "folder",
                                  color: SessionGroup.colors.contains(color) ? color : "blue", emoji: emoji)
-        groups.append(group); groupProfiles[group.id] = profile; organizationChanged(); return group
+        groups.append(group); groupProfiles[group.id] = profile
+        if start != GroupStart() { groupStarts[group.id] = start }
+        // The next new group starts from the same folder and command.
+        if let data = try? JSONEncoder().encode(start) { preferences.set(data, forKey: Self.lastGroupStartKey) }
+        organizationChanged(); return group
+    }
+    static let lastGroupStartKey = "lastGroupStart"
+    public var lastGroupStart: GroupStart {
+        preferences.data(forKey: Self.lastGroupStartKey).flatMap { try? JSONDecoder().decode(GroupStart.self, from: $0) } ?? GroupStart()
+    }
+    public func setGroupStart(id: String, start: GroupStart) {
+        guard groups.contains(where: { $0.id == id }) else { return }
+        groupStarts[id] = start == GroupStart() ? nil : start
+        organizationChanged()
     }
     public func updateGroup(_ group: SessionGroup) {
         guard let index = groups.firstIndex(where: { $0.id == group.id }), let name = SessionMetadata.clean(group.name) else { return }
@@ -204,6 +246,7 @@ public final class HostController: ObservableObject {
         if let index = groups.firstIndex(where: { $0.id == id }) { deletedGroupPositions = [id: index] }
         groups.removeAll { $0.id == id }
         groupProfiles.removeValue(forKey: id)
+        deletedGroupStarts = groupStarts.removeValue(forKey: id).map { [id: $0] } ?? [:]
         for session in sessions where session.groupID == id { session.groupID = nil }
         organizationChanged()
     }
@@ -212,6 +255,7 @@ public final class HostController: ObservableObject {
         let index = min(groups.count, deletedGroupPositions.removeValue(forKey: group.id) ?? groups.count)
         groups.insert(group, at: index)
         groupProfiles[group.id] = profile
+        if let start = deletedGroupStarts.removeValue(forKey: group.id) { groupStarts[group.id] = start }
         for session in sessions where session.profile == profile && session.groupID == nil && sessionIDs.contains(session.id) { session.groupID = group.id }
         organizationChanged()
     }

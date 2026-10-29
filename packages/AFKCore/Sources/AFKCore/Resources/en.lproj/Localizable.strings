@@ -520,3 +520,12 @@
 "↩ o escribe yes para cerrar · esc para cancelar" = "↩ or type yes to close · esc to cancel";
 "Ocultar / mostrar en este Mac" = "Hide / show on this Mac";
 "⇧⌘⌫ cerrar" = "⇧⌘⌫ close";
+"Al abrir una terminal" = "When a terminal opens";
+"Carpeta (por defecto ~)" = "Folder (default ~)";
+"Elegir…" = "Choose…";
+"Comando (opcional)" = "Command (optional)";
+"Sugerencias" = "Suggestions";
+"Ninguno" = "None";
+"Vacío: la terminal abre en tu carpeta personal con la shell lista para escribir." = "Empty: the terminal opens in your home folder with the shell ready to type.";
+"Sin terminales" = "No terminals";
+"La carpeta %@ no existe. La terminal se abrió en tu carpeta personal." = "The folder %@ doesn't exist. The terminal opened in your home folder.";

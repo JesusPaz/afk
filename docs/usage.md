@@ -34,7 +34,7 @@ Everything in the Mac window works from the keyboard. **⌘/** shows this list i
 | ⌘W | Close the selected session: ↩ or type `yes` to confirm, esc to cancel |
 | ⇧⌘W | Close the window; sessions keep running |
 | ⌘K | Go to any terminal by name, folder, group or profile; ⇧⌘⌫ closes the highlighted one |
-| ⌘⌥↑ / ⌘⌥↓ | Previous / next terminal in sidebar order |
+| ⌘⌥↑ / ⌘⌥↓ | Previous / next terminal in sidebar order, stopping on empty groups so ⌘N opens one there |
 | ⌘1 … ⌘9 | Jump to the Nth terminal |
 | ⌘⌥← / ⌘⌥→ | Previous / next profile |
 | ⌃⌘1 … ⌃⌘9 | Switch profile |
@@ -43,7 +43,7 @@ Everything in the Mac window works from the keyboard. **⌘/** shows this list i
 | ⇧⌘M | Move the session to a group or profile (type to filter, ↩ to move) |
 | ⇧⌘H | Hide the session on this Mac, or show it again |
 | ⇧⌘P | Session permissions |
-| ⇧⌘N / ⇧⌘G | New group / edit the session's group |
+| ⇧⌘N / ⇧⌘G | New group / edit the selected group |
 | ⌥⌘N | New profile |
 | ⌘Y / ⇧⌘D / ⇧⌘C | Saved history / Devices / Connection |
 | ⌘, | Settings (live-session limit) |
@@ -87,6 +87,12 @@ shows the same authorized names and groups. Group editing is currently Mac-only.
 Choose a flat system symbol or a single emoji using the macOS character picker.
 Groups remain saved and visible even after their last session closes, including
 after restarting AFK; their shell processes are not restored.
+
+A group can also set where its terminals start: a folder (empty means `~`) and a
+command typed once the prompt appears, such as `claude`, `codex` or `opencode`.
+Leaving the command returns to the shell. A new group starts from the folder and
+command chosen for the last group created. Sessions created from the iPhone are
+ungrouped, so they always open a plain shell in `~`.
 
 On Mac, use the profile tabs in the toolbar (or ⌘⌥← / ⌘⌥→, ⌃⌘1…9) to switch between
 **Personal**, **Work**, and custom profiles created with **+ → New profile…** in the

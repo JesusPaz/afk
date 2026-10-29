@@ -178,6 +178,17 @@ private enum WorkspaceSheet: String, Identifiable {
     }
 }
 
+// A stop in the sidebar: a terminal, or an empty group to land on before ⌘N.
+@MainActor enum WorkspaceItem {
+    case session(HostSession), group(String)
+    var tag: String {
+        switch self {
+        case .session(let session): session.id
+        case .group(let id): "group:" + id
+        }
+    }
+}
+
 struct MacWorkspace: View {
     @ObservedObject var host: HostController
     @AppStorage("workspaceProfile") private var profile: WorkspaceProfile = .personal
@@ -214,6 +225,24 @@ struct MacWorkspace: View {
     private var navigationOrder: [HostSession] {
         visible(groupID: nil) + profileGroups.flatMap { visible(groupID: $0.id) }
     }
+    // ⌘⌥↑ / ⌘⌥↓ stops: like navigationOrder, plus every group that has no terminals.
+    private var navigationStops: [WorkspaceItem] {
+        visible(groupID: nil).map(WorkspaceItem.session) + profileGroups.flatMap { group in
+            let sessions = visible(groupID: group.id)
+            return sessions.isEmpty ? [.group(group.id)] : sessions.map(WorkspaceItem.session)
+        }
+    }
+    private var selectedGroupID: String? {
+        guard let selected else { return nil }
+        if let session = selectedSession { return session.groupID }
+        return profileGroups.first { WorkspaceItem.group($0.id).tag == selected }?.id
+    }
+    private func open(_ item: WorkspaceItem) {
+        switch item {
+        case .session(let session): open(session)
+        case .group(let id): expand(id); selected = item.tag
+        }
+    }
     private func open(_ session: HostSession) {
         expand(session.groupID)
         // Switching profile clears the selection, so select once that has happened.
@@ -225,14 +254,14 @@ struct MacWorkspace: View {
         collapsedGroupIDs = collapsedGroups.subtracting([groupID]).sorted().joined(separator: ",")
     }
     private func step(_ offset: Int) {
-        let order = navigationOrder
+        let order = navigationStops
         guard !order.isEmpty else { return }
-        let current = order.firstIndex { $0.id == selected } ?? (offset > 0 ? -1 : order.count)
+        let current = order.firstIndex { $0.tag == selected } ?? (offset > 0 ? -1 : order.count)
         open(order[(current + offset + order.count) % order.count])
     }
     private var navigation: WorkspaceNavigation {
         WorkspaceNavigation(
-            createSession: { createSession(groupID: host.sessions.first { $0.id == selected }?.groupID) },
+            createSession: { createSession(groupID: selectedGroupID) },
             closeSession: profileSessions.first { $0.id == selected }.map { session in { requestClose(session) } },
             step: step,
             jump: { index in if navigationOrder.indices.contains(index) { open(navigationOrder[index]) } },
@@ -244,7 +273,7 @@ struct MacWorkspace: View {
             },
             quickOpen: { showingSwitcher = true },
             hasSession: selectedSession != nil,
-            hasGroup: selectedSession?.groupID != nil,
+            hasGroup: selectedGroupID != nil,
             sessionHidden: selectedSession?.isHidden == true,
             perform: perform)
     }
@@ -260,7 +289,7 @@ struct MacWorkspace: View {
         case .permissions: if let session { permissionSession = session; sheet = .permissions }
         case .newGroup: editingGroup = nil; showingGroupEditor = true
         case .editGroup:
-            if let group = session.flatMap(group(for:)) { editingGroup = group; showingGroupEditor = true }
+            if let group = host.groups.first(where: { $0.id == selectedGroupID }) { editingGroup = group; showingGroupEditor = true }
         case .newProfile: newProfileName = ""; showingProfileEditor = true
         case .history: showingHistory = true
         case .devices: sheet = .devices
@@ -270,8 +299,7 @@ struct MacWorkspace: View {
     }
 
     private func createSession(groupID: String? = nil) {
-        guard let session = host.create(profile: profile) else { return }
-        if let groupID { host.moveSession(id: session.id, groupID: groupID) }
+        guard let session = host.create(profile: profile, groupID: groupID) else { return }
         selected = session.id
     }
     private func group(for session: HostSession) -> SessionGroup? {
@@ -327,8 +355,11 @@ struct MacWorkspace: View {
                     )) {
                         ForEach(visible(groupID: group.id)) { session in sessionRow(session) }
                         if visible(groupID: group.id).isEmpty {
-                            Button(L10n.text("Nueva sesión")) { createSession(groupID: group.id) }
-                                .foregroundStyle(.secondary)
+                            HStack {
+                                Text(L10n.text("Sin terminales")).foregroundStyle(.secondary)
+                                Spacer()
+                                Button(L10n.text("Nueva sesión")) { createSession(groupID: group.id) }.buttonStyle(.borderless)
+                            }.tag(WorkspaceItem.group(group.id).tag)
                         }
                     } label: {
                         HStack(spacing: 7) {
@@ -424,10 +455,11 @@ struct MacWorkspace: View {
                     ContentUnavailableView {
                         Label(L10n.text("Elige una terminal"), systemImage: "terminal")
                     } description: {
-                        if let emptyTitle { Text(emptyTitle).fontWeight(.medium) }
+                        if let group = profileGroups.first(where: { $0.id == selectedGroupID }) { Text(group.name).fontWeight(.medium) }
+                        else if let emptyTitle { Text(emptyTitle).fontWeight(.medium) }
                         Text(L10n.text("Selecciona una sesión en la barra lateral o abre una nueva."))
                     } actions: {
-                        Button(L10n.text("Nueva sesión")) { createSession() }.buttonStyle(.borderedProminent)
+                        Button(L10n.text("Nueva sesión")) { createSession(groupID: selectedGroupID) }.buttonStyle(.borderedProminent)
                     }
                 }
             }
@@ -490,10 +522,14 @@ struct MacWorkspace: View {
             Button(L10n.text("Cancelar"), role: .cancel) {}
         }
         .sheet(isPresented: $showingGroupEditor) {
-            SessionGroupEditor(group: editingGroup) { name, symbol, color, emoji in
+            SessionGroupEditor(group: editingGroup, start: editingGroup.map { host.groupStarts[$0.id] ?? GroupStart() } ?? host.lastGroupStart) { name, symbol, color, emoji, start in
                 if let group = editingGroup {
                     host.updateGroup(SessionGroup(id: group.id, name: name, symbol: symbol, color: color, emoji: emoji))
-                } else { _ = host.createGroup(name: name, symbol: symbol, color: color, emoji: emoji, profile: profile) }
+                    host.setGroupStart(id: group.id, start: start)
+                } else if let group = host.createGroup(name: name, symbol: symbol, color: color, emoji: emoji, profile: profile, start: start) {
+                    // Land on the new group so ⌘N opens its first terminal there.
+                    expand(group.id); selected = WorkspaceItem.group(group.id).tag
+                }
             }
         }
         .alert(L10n.text("No se pudo completar la acción"), isPresented: Binding(
@@ -513,7 +549,8 @@ struct MacWorkspace: View {
             host.checkConnection(force: true)
         }
         .onChange(of: host.sessions.map(\.id)) { _, next in
-            if let selected, !next.contains(selected) { self.selected = nil }
+            // An empty group stays selected while it has no terminals of its own.
+            if let selected, !next.contains(selected), selectedGroupID == nil || !visible(groupID: selectedGroupID).isEmpty { self.selected = nil }
         }
         .onChange(of: selected) { _, next in
             if let next { lastSelection[profile] = next }
@@ -1383,19 +1420,25 @@ struct SessionNameEditor: View {
 
 struct SessionGroupEditor: View {
     let group: SessionGroup?
-    let save: (String, String, String, String?) -> Void
+    let save: (String, String, String, String?, GroupStart) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var symbol: String
     @State private var color: String
     @State private var emoji: String
+    @State private var directory: String
+    @State private var command: String
     @FocusState private var emojiFocused: Bool
     @FocusState private var focused: Bool
     private let symbols = [("diamond", "Diamante"), ("square", "Cuadrado"), ("hexagon", "Hexágono"), ("circle", "Círculo"), ("triangle", "Triángulo"), ("folder", "Carpeta"), ("terminal", "Terminal"), ("chevron.left.forwardslash.chevron.right", "Código"), ("server.rack", "Servidor"), ("cloud", "Nube"), ("wrench.and.screwdriver", "Herramientas"), ("star", "Estrella")]
     private let colors = [("blue", "Azul"), ("purple", "Morado"), ("teal", "Verde azulado"), ("orange", "Naranja"), ("pink", "Rosa"), ("gray", "Gris")]
 
-    init(group: SessionGroup?, save: @escaping (String, String, String, String?) -> Void) {
+    private let commands = ["claude", "codex", "opencode"]
+
+    init(group: SessionGroup?, start: GroupStart, save: @escaping (String, String, String, String?, GroupStart) -> Void) {
         self.group = group; self.save = save
+        _directory = State(initialValue: start.directory ?? "")
+        _command = State(initialValue: start.command ?? "")
         _name = State(initialValue: group?.name ?? "")
         _symbol = State(initialValue: group?.symbol ?? "diamond")
         _color = State(initialValue: group?.color ?? "blue")
@@ -1445,6 +1488,24 @@ struct SessionGroupEditor: View {
                 .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
             Text(L10n.text("El nombre y el símbolo identifican el grupo incluso sin distinguir los colores."))
                 .font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L10n.text("Al abrir una terminal")).font(.headline)
+                HStack(spacing: 10) {
+                    TextField(L10n.text("Carpeta (por defecto ~)"), text: $directory).textFieldStyle(.roundedBorder)
+                    Button(L10n.text("Elegir…")) { chooseDirectory() }
+                }
+                HStack(spacing: 10) {
+                    TextField(L10n.text("Comando (opcional)"), text: $command).textFieldStyle(.roundedBorder)
+                        .font(.body.monospaced())
+                    Menu(L10n.text("Sugerencias")) {
+                        ForEach(commands, id: \.self) { item in Button(item) { command = item } }
+                        Divider()
+                        Button(L10n.text("Ninguno")) { command = "" }
+                    }.fixedSize()
+                }
+                Text(L10n.text("Vacío: la terminal abre en tu carpeta personal con la shell lista para escribir."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
                 Spacer()
                 Button(L10n.text("Cancelar")) { dismiss() }.keyboardShortcut(.cancelAction)
@@ -1457,6 +1518,15 @@ struct SessionGroupEditor: View {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         guard emoji.isEmpty || SessionGroup.cleanEmoji(emoji) != nil else { return }
-        save(value, symbol, color, SessionGroup.cleanEmoji(emoji)); dismiss()
+        save(value, symbol, color, SessionGroup.cleanEmoji(emoji), GroupStart(directory: directory, command: command)); dismiss()
+    }
+    private func chooseDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        let current = (directory as NSString).expandingTildeInPath
+        if !directory.isEmpty { panel.directoryURL = URL(fileURLWithPath: current) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        directory = url.path.hasPrefix(home) ? "~" + url.path.dropFirst(home.count) : url.path
     }
 }

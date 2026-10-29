@@ -244,6 +244,43 @@ final class SessionOrganizationTests: XCTestCase {
         for _ in 0..<100 where !exited { try await Task.sleep(for: .milliseconds(50)) }
         XCTAssertTrue(exited)
     }
+    @MainActor func testGroupStartsTerminalsInItsFolderWithItsCommand() async throws {
+        let suite = "afk-start-" + UUID().uuidString
+        let preferences = UserDefaults(suiteName: suite)!
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("afk-start-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let host = HostController(preferences: preferences)
+        defer { host.shutdown() }
+        let start = GroupStart(directory: folder.path, command: "  printf AFK_; printf START; pwd  ")
+        XCTAssertEqual(start.command, "printf AFK_; printf START; pwd")
+        let group = try XCTUnwrap(host.createGroup(name: "Work", profile: .work, start: start))
+        XCTAssertEqual(host.lastGroupStart, start, "the next new group starts from the last choice")
+        let session = try XCTUnwrap(host.create(profile: .personal, groupID: group.id))
+        XCTAssertEqual(session.groupID, group.id)
+        XCTAssertEqual(session.profile, .work, "a group's terminal follows the group's profile")
+        var output = ""
+        _ = session.feed.observe { events, _ in
+            for event in events { if let data = event.data { output += String(decoding: data, as: UTF8.self) } }
+        }
+        for _ in 0..<100 where !output.contains("AFK_START" + folder.lastPathComponent) && !output.contains("AFK_START/") { try await Task.sleep(for: .milliseconds(30)) }
+        XCTAssertTrue(output.contains("AFK_START"), "the command runs on its own")
+        XCTAssertTrue(output.contains(folder.lastPathComponent), "the shell starts in the group's folder")
+        XCTAssertTrue(session.running, "leaving the command keeps the shell")
+
+        // Restarting keeps the group's settings; a missing folder falls back to home and says so.
+        let reopened = HostController(preferences: preferences)
+        defer { reopened.shutdown() }
+        XCTAssertEqual(reopened.groupStarts[group.id], start)
+        reopened.setGroupStart(id: group.id, start: GroupStart(directory: folder.appendingPathComponent("missing").path))
+        XCTAssertNotNil(reopened.create(groupID: group.id))
+        XCTAssertNotNil(reopened.error)
+        reopened.setGroupStart(id: group.id, start: GroupStart(directory: " ", command: ""))
+        XCTAssertNil(reopened.groupStarts[group.id], "an empty start is the default")
+        let plain = try XCTUnwrap(reopened.create(groupID: "missing"))
+        XCTAssertNil(plain.groupID)
+    }
     @MainActor func testClosedSessionLeavesAtOnceAndResistantJobIsForced() async throws {
         let suite = "afk-close-" + UUID().uuidString
         let preferences = UserDefaults(suiteName: suite)!

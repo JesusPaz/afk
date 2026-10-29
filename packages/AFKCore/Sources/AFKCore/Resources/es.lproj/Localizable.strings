@@ -520,3 +520,12 @@
 "↩ o escribe yes para cerrar · esc para cancelar" = "↩ o escribe yes para cerrar · esc para cancelar";
 "Ocultar / mostrar en este Mac" = "Ocultar / mostrar en este Mac";
 "⇧⌘⌫ cerrar" = "⇧⌘⌫ cerrar";
+"Al abrir una terminal" = "Al abrir una terminal";
+"Carpeta (por defecto ~)" = "Carpeta (por defecto ~)";
+"Elegir…" = "Elegir…";
+"Comando (opcional)" = "Comando (opcional)";
+"Sugerencias" = "Sugerencias";
+"Ninguno" = "Ninguno";
+"Vacío: la terminal abre en tu carpeta personal con la shell lista para escribir." = "Vacío: la terminal abre en tu carpeta personal con la shell lista para escribir.";
+"Sin terminales" = "Sin terminales";
+"La carpeta %@ no existe. La terminal se abrió en tu carpeta personal." = "La carpeta %@ no existe. La terminal se abrió en tu carpeta personal.";

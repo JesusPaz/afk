@@ -46,6 +46,8 @@ public final class HostSession: ObservableObject, Identifiable {
         return String(title[..<separator.lowerBound])
     }
     private var metadataTask: Task<Void, Never>?
+    private var startCommand: String?
+    private var startCommandTask: Task<Void, Never>?
     public let feed: TerminalFeed
     @Published public private(set) var running = true
     @Published public private(set) var lease = ControlLease()
@@ -108,13 +110,17 @@ public final class HostSession: ObservableObject, Identifiable {
         process.onExit = { [weak self] in self?.exited($0) }
     }
     deinit { if let temporaryScreenDirectory { try? FileManager.default.removeItem(at: temporaryScreenDirectory) } }
-    public func start() {
+    /// Starts the shell in `directory` (home when nil) and types `command` once the prompt is drawn,
+    /// as if the user had, so leaving the command returns to the shell instead of ending the session.
+    public func start(directory: URL? = nil, command: String? = nil) {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("AFK_") && $0.key != "DATABASE_URL" }
         environment["TERM"] = "xterm-256color"; environment["COLORTERM"] = "truecolor"
         environment["TERM_PROGRAM"] = "AFK"
         environment.removeValue(forKey: "TERM_PROGRAM_VERSION")
-        if !process.start(shell: shell, environment: environment.map { "\($0.key)=\($0.value)" }) { exited(-1) }
+        let directory = directory ?? FileManager.default.homeDirectoryForCurrentUser
+        if !process.start(shell: shell, environment: environment.map { "\($0.key)=\($0.value)" }, directory: directory.path) { exited(-1); return }
+        startCommand = command
     }
     public func claim(_ client: String) {
         guard running, !closing else { return }
@@ -186,6 +192,16 @@ public final class HostSession: ObservableObject, Identifiable {
         var message = Message("control", sessionID: id); message.owner = lease.owner; message.epoch = lease.epoch; onEvent?(message); onState?()
     }
     private func received(_ bytes: Data) {
+        // Typed before the prompt, the kernel would echo the command above it a second time.
+        if startCommand != nil {
+            startCommandTask?.cancel()
+            startCommandTask = Task { [weak self] in
+                do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+                guard let self, let command = self.startCommand, self.running, !self.closing else { return }
+                self.startCommand = nil
+                _ = self.process.send(Data((command + "\r").utf8))
+            }
+        }
         if pendingOutput.count + bytes.count > 64 * 1024 { flushOutput() }
         pendingOutput.append(bytes)
         guard outputTask == nil else { return }
