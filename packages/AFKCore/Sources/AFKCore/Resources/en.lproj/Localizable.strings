@@ -529,6 +529,8 @@
 "Vacío: la terminal abre en tu carpeta personal con la shell lista para escribir." = "Empty: the terminal opens in your home folder with the shell ready to type.";
 "Sin terminales" = "No terminals";
 "La carpeta %@ no existe. La terminal se abrió en tu carpeta personal." = "The folder %@ doesn't exist. The terminal opened in your home folder.";
+"AFK no trae servidor. Monta el tuyo: reenvía el tráfico cifrado entre el Mac y el iPhone y no puede leer tus terminales." = "AFK doesn't come with a server. Run your own: it forwards encrypted traffic between the Mac and the iPhone and can't read your terminals.";
+"Cómo montar tu servidor" = "How to run your server";
 "Activa el acceso remoto en Conexión." = "Turn on remote access in Connection.";
 "Acceso remoto" = "Remote access";
 "Apagado, AFK se desconecta del servidor y corta a todos los dispositivos. Tus terminales siguen abiertas. Solo se vuelve a activar desde este Mac." = "When off, AFK disconnects from the server and cuts off every device. Your terminals stay open. It can only be turned back on from this Mac.";
