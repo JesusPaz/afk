@@ -1126,6 +1126,20 @@ private struct MacConnectionSheet: View {
 
     private var serverContent: some View {
         VStack(alignment: .leading, spacing: 16) {
+            Toggle(isOn: Binding(
+                get: { !host.remoteAccessPaused },
+                set: { on in
+                    if on { Task { busy = true; host.error = nil; await host.resume(server: server); busy = false } }
+                    else { host.pause() }
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.text("Acceso remoto")).font(.headline)
+                    Text(L10n.text("Apagado, AFK se desconecta del servidor y corta a todos los dispositivos. Tus terminales siguen abiertas. Solo se vuelve a activar desde este Mac."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }.toggleStyle(.switch).disabled(busy)
+            Divider()
             Text(L10n.text("Servidor de AFK")).font(.headline)
             TextField(L10n.text("URL del servidor"), text: $server).textFieldStyle(.roundedBorder)
                 .accessibilityLabel(L10n.text("URL del servidor de AFK"))
@@ -1133,7 +1147,7 @@ private struct MacConnectionSheet: View {
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
                 Button(busy ? L10n.text("Conectando…") : L10n.text("Conectar al servidor")) { Task { busy = true; host.error = nil; await host.connect(server: server); busy = false } }
-                    .buttonStyle(.borderedProminent).disabled(busy)
+                    .buttonStyle(.borderedProminent).disabled(busy || host.remoteAccessPaused)
                 if busy { ProgressView().controlSize(.small) }
             }
             RemoteAccessStatus(host: host, relay: host.relay)
@@ -1188,9 +1202,9 @@ private struct AccessToggle: View {
             RemoteAccessStatus(host: host, relay: relay)
             Text(L10n.text("Pausar el acceso no cierra tus terminales ni elimina los dispositivos vinculados."))
                 .font(.caption).foregroundStyle(.secondary)
-            Button(relay.connected ? L10n.text("Pausar acceso remoto") : L10n.text("Reanudar acceso remoto")) {
-                if relay.connected { host.pause() }
-                else { Task { busy = true; await host.connect(server: server); busy = false } }
+            Button(host.remoteAccessPaused ? L10n.text("Reanudar acceso remoto") : L10n.text("Pausar acceso remoto")) {
+                if !host.remoteAccessPaused { host.pause() }
+                else { Task { busy = true; await host.resume(server: server); busy = false } }
             }.disabled(busy)
         }
     }

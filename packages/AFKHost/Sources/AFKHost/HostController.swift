@@ -313,8 +313,10 @@ public final class HostController: ObservableObject {
         guard !remoteAccessPaused else { return }
         await connect(server: server)
     }
+    // Only resume(server:) turns remote access back on, so pairing, retries and the
+    // iPhone cannot reopen it after it was switched off on this Mac.
     public func connect(server: String, credentials: HostSecret? = nil, automatic: Bool = false) async {
-        guard !connecting else { return }
+        guard !connecting, !remoteAccessPaused else { return }
         connecting = true; recoveryServer = server
         defer {
             connecting = false
@@ -328,7 +330,6 @@ public final class HostController: ObservableObject {
             if credentials == nil && saved == nil { try SecretStore.write(identity, account: "host:\(url.absoluteString)") }
             if base != nil && (base != url || secret?.id != identity.id) { stopRemoteAccess() }
             let h = try await relay.connect(url, id: identity.id, token: identity.token, name: Host.current().localizedName ?? "Mac")
-            remoteAccessPaused = false; preferences.set(false, forKey: "remoteAccessPaused")
             base = url; secret = identity; host = h; error = nil; restoreTrustedAccess()
         } catch { if !automatic { self.error = error.localizedDescription } }
     }
@@ -338,6 +339,7 @@ public final class HostController: ObservableObject {
     }
     public func beginPairing(server: String) async {
         cancelPairing()
+        guard !remoteAccessPaused else { error = L10n.text("Activa el acceso remoto en Conexión."); return }
         let generation = pairingGeneration
         if !relay.connected { await connect(server: server) }
         guard generation == pairingGeneration, !Task.isCancelled, error == nil else { return }
@@ -389,6 +391,10 @@ public final class HostController: ObservableObject {
         do { try relay.clearFullAccess() } catch { self.error = error.localizedDescription }
         do { try relay.cancelInvitation() } catch { self.error = error.localizedDescription }
         record(.stopped)
+    }
+    public func resume(server: String) async {
+        remoteAccessPaused = false; preferences.set(false, forKey: "remoteAccessPaused")
+        await connect(server: server)
     }
     public func disconnect() { recoveryServer = nil; relay.disconnect() }
     public func shutdown() { recoveryServer = nil; trustUnlock.invalidate(); accessRevision += 1; relay.disconnect(); sessions.forEach { $0.forceClose() }; timer?.invalidate() }

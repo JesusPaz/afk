@@ -529,3 +529,6 @@
 "Vacío: la terminal abre en tu carpeta personal con la shell lista para escribir." = "Vacío: la terminal abre en tu carpeta personal con la shell lista para escribir.";
 "Sin terminales" = "Sin terminales";
 "La carpeta %@ no existe. La terminal se abrió en tu carpeta personal." = "La carpeta %@ no existe. La terminal se abrió en tu carpeta personal.";
+"Activa el acceso remoto en Conexión." = "Activa el acceso remoto en Conexión.";
+"Acceso remoto" = "Acceso remoto";
+"Apagado, AFK se desconecta del servidor y corta a todos los dispositivos. Tus terminales siguen abiertas. Solo se vuelve a activar desde este Mac." = "Apagado, AFK se desconecta del servidor y corta a todos los dispositivos. Tus terminales siguen abiertas. Solo se vuelve a activar desde este Mac.";

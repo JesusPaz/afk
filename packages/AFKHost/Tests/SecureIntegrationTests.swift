@@ -323,7 +323,10 @@ import Security
     }
     private func withTestHost(_ operation: (HostController, inout [String]) async throws -> Void) async throws {
         guard let server = ProcessInfo.processInfo.environment["AFK_E2EE_TEST_URL"] else { throw XCTSkip("requires the local v2 relay and PostgreSQL") }
-        let host = HostController(preferences: UserDefaults(suiteName: "AFK-secure-tests")!)
+        let preferences = UserDefaults(suiteName: "AFK-secure-tests")!
+        // A pause from an earlier run would otherwise keep this host offline.
+        preferences.removeObject(forKey: "remoteAccessPaused")
+        let host = HostController(preferences: preferences)
         let credentials = try HostSecret(id: ProcessInfo.processInfo.environment["AFK_E2EE_HOST_ID"] ?? UUID().uuidString, token: SecretStore.randomToken())
         var accounts = ["host-trust-v2:\(try canonicalServer(server)):\(credentials.id)"]
         defer {
