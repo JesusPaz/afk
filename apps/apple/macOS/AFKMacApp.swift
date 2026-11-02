@@ -345,7 +345,9 @@ struct MacWorkspace: View {
                 // Like Reminders: loose items sit at the top without a header.
                 ForEach(visible(groupID: nil)) { session in sessionRow(session) }
                 ForEach(profileGroups) { group in
-                    DisclosureGroup(isExpanded: Binding(
+                    // Not a DisclosureGroup: its outline leaves the "Sin terminales" row painted
+                    // under the first session when one replaces the other.
+                    Section(isExpanded: Binding(
                         get: { !collapsedGroups.contains(group.id) },
                         set: { expanded in
                             var ids = collapsedGroups
@@ -361,7 +363,7 @@ struct MacWorkspace: View {
                                 Button(L10n.text("Nueva sesión")) { createSession(groupID: group.id) }.buttonStyle(.borderless)
                             }.tag(WorkspaceItem.group(group.id).tag)
                         }
-                    } label: {
+                    } header: {
                         HStack(spacing: 7) {
                             SessionGroupMark(group: group)
                             Text(group.name).lineLimit(1)
@@ -379,23 +381,26 @@ struct MacWorkspace: View {
                         .contextMenu { groupActions(group) }
                     }
                 }
-                if !hidden.isEmpty {
-                    DisclosureGroup(isExpanded: $showingHidden) {
-                        ForEach(hidden) { session in
-                            HStack {
-                                sessionRow(session)
-                                Button(L10n.text("Mostrar")) {
-                                    host.setHidden(id: session.id, hidden: false)
-                                    selected = session.id
-                                }.buttonStyle(.borderless)
-                            }.selectionDisabled()
-                        }
-                    } label: { Label(L10n.text("Ocultas") + " · " + hidden.count.formatted(), systemImage: "eye.slash") }
-                }
-                if !ended.isEmpty {
-                    DisclosureGroup(isExpanded: $showingEnded) {
-                        ForEach(ended) { session in sessionRow(session) }
-                    } label: { Label(L10n.text("Terminadas") + " · " + ended.count.formatted(), systemImage: "stop.circle") }
+                // Its own section, or these would read as part of the last group.
+                Section {
+                    if !hidden.isEmpty {
+                        DisclosureGroup(isExpanded: $showingHidden) {
+                            ForEach(hidden) { session in
+                                HStack {
+                                    sessionRow(session)
+                                    Button(L10n.text("Mostrar")) {
+                                        host.setHidden(id: session.id, hidden: false)
+                                        selected = session.id
+                                    }.buttonStyle(.borderless)
+                                }.selectionDisabled()
+                            }
+                        } label: { Label(L10n.text("Ocultas") + " · " + hidden.count.formatted(), systemImage: "eye.slash") }
+                    }
+                    if !ended.isEmpty {
+                        DisclosureGroup(isExpanded: $showingEnded) {
+                            ForEach(ended) { session in sessionRow(session) }
+                        } label: { Label(L10n.text("Terminadas") + " · " + ended.count.formatted(), systemImage: "stop.circle") }
+                    }
                 }
             }
             .listStyle(.sidebar)
