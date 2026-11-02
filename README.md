@@ -23,7 +23,8 @@ to Homebrew.
 
 ## Use it
 
-1. Open AFK on the Mac; a shell starts right away.
+1. Open AFK on the Mac; a shell starts right away. In **Connection**, enter the address of
+   [your own server](docs/self-hosting.md).
 2. In **Devices**, choose **Pair iPhone** and scan the QR with the iPhone app.
 3. Compare the code on both screens and approve on the Mac.
 4. Share sessions from **Devices → Sessions and permissions** (pairing alone shares nothing).
@@ -38,6 +39,7 @@ Shortcuts on the Mac: **⌘K** go to a terminal, **⌘⌥↑ / ⌘⌥↓** previ
 | | |
 | --- | --- |
 | [Using AFK](docs/usage.md) | Pairing, devices, sessions, groups, profiles, history, limits |
+| [Run your own server](docs/self-hosting.md) | What the relay does and how to host it; AFK has no default server |
 | [Development](docs/development.md) | Run locally, tests, native builds, repository layout |
 | [Releasing](docs/releasing.md) | Step-by-step release from this Mac or EAS |
 | [Publishing reference](docs/publishing.md) | Workflows, credentials, signing |

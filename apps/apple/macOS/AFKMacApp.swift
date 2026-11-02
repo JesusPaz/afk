@@ -193,7 +193,7 @@ struct MacWorkspace: View {
     @ObservedObject var host: HostController
     @AppStorage("workspaceProfile") private var profile: WorkspaceProfile = .personal
     @State private var selected: String?
-    @AppStorage("relayURL") private var server = Bundle.main.object(forInfoDictionaryKey: "AFKRelayURL") as? String ?? "http://127.0.0.1:8787"
+    @AppStorage("relayURL") private var server = ""
     @State private var sheet: WorkspaceSheet?
     @State private var showingHistory = false
     @State private var permissionSession: HostSession?
@@ -1127,8 +1127,11 @@ private struct MacConnectionSheet: View {
     private var serverContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(L10n.text("Servidor de AFK")).font(.headline)
-            TextField(L10n.text("URL del servidor"), text: $server).textFieldStyle(.roundedBorder)
+            TextField(L10n.text("URL del servidor"), text: $server, prompt: Text(verbatim: "https://afk.example.com")).textFieldStyle(.roundedBorder)
                 .accessibilityLabel(L10n.text("URL del servidor de AFK"))
+            Text(L10n.text("AFK no trae servidor. Monta el tuyo: reenvía el tráfico cifrado entre el Mac y el iPhone y no puede leer tus terminales."))
+                .font(.callout).foregroundStyle(.secondary)
+            Link(L10n.text("Cómo montar tu servidor"), destination: URL(string: "https://github.com/JesusPaz/afk/blob/main/docs/self-hosting.md")!)
             Text(L10n.text("En este Mac y su simulador puedes usar http://127.0.0.1:8787. Para un iPhone físico usa HTTPS."))
                 .font(.callout).foregroundStyle(.secondary)
             HStack {

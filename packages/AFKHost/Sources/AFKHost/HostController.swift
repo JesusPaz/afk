@@ -310,7 +310,8 @@ public final class HostController: ObservableObject {
     public func restoreConnection(server: String) async {
         guard !restoredConnection else { return }
         restoredConnection = true
-        guard !remoteAccessPaused else { return }
+        // No server is configured until the owner enters one.
+        guard !remoteAccessPaused, !server.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         await connect(server: server)
     }
     public func connect(server: String, credentials: HostSecret? = nil, automatic: Bool = false) async {

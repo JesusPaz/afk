@@ -17,6 +17,16 @@ final class StartupTests: XCTestCase {
         await host.restoreConnection(server: "invalid")
         XCTAssertNil(host.error)
     }
+    @MainActor func testStartupWithoutServerStaysQuiet() async {
+        let suite = "afk-tests-" + UUID().uuidString
+        let preferences = UserDefaults(suiteName: suite)!
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let host = HostController(preferences: preferences)
+        defer { host.shutdown() }
+        await host.restoreConnection(server: "")
+        XCTAssertNil(host.error)
+        XCTAssertFalse(host.connecting)
+    }
     @MainActor func testExplicitPauseSurvivesNewController() async {
         let suite = "afk-tests-" + UUID().uuidString
         let preferences = UserDefaults(suiteName: suite)!
