@@ -40,5 +40,24 @@ final class StartupTests: XCTestCase {
         XCTAssertNil(host.error)
         XCTAssertFalse(host.connecting)
     }
+    @MainActor func testOnlyResumeTurnsRemoteAccessBackOn() async {
+        let suite = "afk-tests-" + UUID().uuidString
+        let preferences = UserDefaults(suiteName: suite)!
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let host = HostController(preferences: preferences)
+        defer { host.shutdown() }
+        host.pause()
+        await host.connect(server: "invalid")
+        XCTAssertTrue(host.remoteAccessPaused)
+        XCTAssertNil(host.error)
+        await host.beginPairing(server: "invalid")
+        XCTAssertTrue(host.remoteAccessPaused)
+        XCTAssertNotNil(host.error)
+        host.error = nil
+        await host.resume(server: "invalid")
+        XCTAssertFalse(host.remoteAccessPaused)
+        XCTAssertFalse(preferences.bool(forKey: "remoteAccessPaused"))
+        XCTAssertNotNil(host.error)
+    }
 }
 #endif

@@ -531,3 +531,6 @@
 "La carpeta %@ no existe. La terminal se abrió en tu carpeta personal." = "La carpeta %@ no existe. La terminal se abrió en tu carpeta personal.";
 "AFK no trae servidor. Monta el tuyo: reenvía el tráfico cifrado entre el Mac y el iPhone y no puede leer tus terminales." = "AFK no trae servidor. Monta el tuyo: reenvía el tráfico cifrado entre el Mac y el iPhone y no puede leer tus terminales.";
 "Cómo montar tu servidor" = "Cómo montar tu servidor";
+"Activa el acceso remoto en Conexión." = "Activa el acceso remoto en Conexión.";
+"Acceso remoto" = "Acceso remoto";
+"Apagado, AFK se desconecta del servidor y corta a todos los dispositivos. Tus terminales siguen abiertas. Solo se vuelve a activar desde este Mac." = "Apagado, AFK se desconecta del servidor y corta a todos los dispositivos. Tus terminales siguen abiertas. Solo se vuelve a activar desde este Mac.";
