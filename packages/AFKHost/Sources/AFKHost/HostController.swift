@@ -328,7 +328,10 @@ public final class HostController: ObservableObject {
             let saved: HostSecret? = try credentials ?? (base == url ? secret : nil) ?? SecretStore.read("host:\(url.absoluteString)")
             let identity = try saved ?? HostSecret(token: SecretStore.randomToken())
             if credentials == nil && saved == nil { try SecretStore.write(identity, account: "host:\(url.absoluteString)") }
-            if base != nil && (base != url || secret?.id != identity.id) { stopRemoteAccess() }
+            if base != nil && (base != url || secret?.id != identity.id) {
+                // Changing server cuts every device off, but remote access stays on.
+                stopRemoteAccess(); remoteAccessPaused = false; preferences.set(false, forKey: "remoteAccessPaused")
+            }
             let h = try await relay.connect(url, id: identity.id, token: identity.token, name: Host.current().localizedName ?? "Mac")
             base = url; secret = identity; host = h; error = nil; restoreTrustedAccess()
         } catch { if !automatic { self.error = error.localizedDescription } }
